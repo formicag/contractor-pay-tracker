@@ -380,13 +380,21 @@ def check_duplicates(event: dict, logger: StructuredLogger) -> dict:
     file_id = event['fileId']
     print(f"[FILE_PROCESSOR] Result: file_id = {file_id}")
 
-    print("[FILE_PROCESSOR] About to execute: umbrella_id = event['umbrella_id']")
-    umbrella_id = event['umbrella_id']
+    print("[FILE_PROCESSOR] About to execute: umbrella_id = event.get('period', {}).get('umbrella_id')")
+    umbrella_id = event.get('period', {}).get('umbrella_id')
     print(f"[FILE_PROCESSOR] Result: umbrella_id = {umbrella_id}")
 
-    print("[FILE_PROCESSOR] About to execute: period_id = event['period_id']")
-    period_id = event['period_id']
+    if not umbrella_id:
+        print("[FILE_PROCESSOR] Error: umbrella_id not found in event['period']")
+        raise ValueError("Missing umbrella_id in period data")
+
+    print("[FILE_PROCESSOR] About to execute: period_id = event.get('period', {}).get('period_id')")
+    period_id = event.get('period', {}).get('period_id')
     print(f"[FILE_PROCESSOR] Result: period_id = {period_id}")
+
+    if not period_id:
+        print("[FILE_PROCESSOR] Error: period_id not found in event['period']")
+        raise ValueError("Missing period_id in period data")
 
     print(f"[FILE_PROCESSOR] About to execute: logger.info 'Checking duplicates' for file_id = {file_id}, umbrella_id = {umbrella_id}, period_id = {period_id}")
     logger.info("Checking duplicates", file_id=file_id, umbrella_id=umbrella_id, period_id=period_id)
@@ -530,13 +538,21 @@ def parse_records(event: dict, logger: StructuredLogger) -> dict:
     file_id = event['fileId']
     print(f"[FILE_PROCESSOR] Result: file_id = {file_id}")
 
-    print("[FILE_PROCESSOR] About to execute: umbrella_id = event['umbrella_id']")
-    umbrella_id = event['umbrella_id']
+    print("[FILE_PROCESSOR] About to execute: umbrella_id = event.get('period', {}).get('umbrella_id')")
+    umbrella_id = event.get('period', {}).get('umbrella_id')
     print(f"[FILE_PROCESSOR] Result: umbrella_id = {umbrella_id}")
 
-    print("[FILE_PROCESSOR] About to execute: period_id = event['period_id']")
-    period_id = event['period_id']
+    if not umbrella_id:
+        print("[FILE_PROCESSOR] Error: umbrella_id not found in event['period']")
+        raise ValueError("Missing umbrella_id in period data")
+
+    print("[FILE_PROCESSOR] About to execute: period_id = event.get('period', {}).get('period_id')")
+    period_id = event.get('period', {}).get('period_id')
     print(f"[FILE_PROCESSOR] Result: period_id = {period_id}")
+
+    if not period_id:
+        print("[FILE_PROCESSOR] Error: period_id not found in event['period']")
+        raise ValueError("Missing period_id in period data")
 
     print(f"[FILE_PROCESSOR] About to execute: logger.info 'Parsing records' for file_id = {file_id}")
     logger.info("Parsing records", file_id=file_id)
