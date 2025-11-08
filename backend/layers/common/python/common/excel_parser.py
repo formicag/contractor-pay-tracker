@@ -174,10 +174,10 @@ class PayFileParser:
             elif 'forename' in header or 'first' in header or 'firstname' in header:
                 print(f"[GET_COLUMN_MAPPING] Matched 'forename' at index {idx}")
                 column_map['forename'] = idx
-            elif 'unit' in header and 'day' in header:
+            elif 'unit' in header:
                 print(f"[GET_COLUMN_MAPPING] Matched 'unit' at index {idx}")
                 column_map['unit'] = idx
-            elif 'day' in header and 'rate' in header.lower():
+            elif 'rate' in header:
                 print(f"[GET_COLUMN_MAPPING] Matched 'rate' at index {idx}")
                 column_map['rate'] = idx
             elif header == 'per':
