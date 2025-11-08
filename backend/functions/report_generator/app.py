@@ -106,7 +106,7 @@ def lambda_handler(event, context):
             result = generate_summary_report(filters, logger)
             print(f"[REPORT_GENERATOR] Result from generate_summary_report: {result}")
 
-        if report_type == 'detailed':
+        elif report_type == 'detailed':
             print(f"[REPORT_GENERATOR] About to execute: check report_type == 'detailed'")
             print("[REPORT_GENERATOR] About to execute: result = generate_detailed_report(filters, logger)")
             result = generate_detailed_report(filters, logger)

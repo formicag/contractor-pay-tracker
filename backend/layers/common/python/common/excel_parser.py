@@ -345,8 +345,8 @@ class PayFileParser:
 
     def _is_overtime_record(self, notes: str) -> bool:
         """Check if a record is an overtime record based on notes"""
-        print(f"[IS_OVERTIME_RECORD] Checking if notes contain 'overtime': {notes}")
-        result = 'overtime' in notes.lower()
+        print(f"[IS_OVERTIME_RECORD] Checking if notes contain 'overtime' or 'OT': {notes}")
+        result = 'overtime' in notes.lower() or notes.upper() == 'OT'
         print(f"[IS_OVERTIME_RECORD] Result: {result}")
         return result
 
