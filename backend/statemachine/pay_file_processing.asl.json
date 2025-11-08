@@ -144,8 +144,8 @@
       "Parameters": {
         "action": "import_records",
         "fileId.$": "$.fileId",
-        "records.$": "$.parsedRecords.records",
-        "validation.$": "$.validation"
+        "validated_records.$": "$.validation.validatedRecords",
+        "has_warnings.$": "$.validation.hasWarnings"
       },
       "ResultPath": "$.import",
       "Next": "ProcessingComplete",
@@ -164,7 +164,8 @@
       "Parameters": {
         "action": "mark_complete",
         "fileId.$": "$.fileId",
-        "import.$": "$.import"
+        "import_result.$": "$.import",
+        "has_warnings.$": "$.import.has_warnings"
       },
       "ResultPath": "$.completed",
       "Next": "Success",

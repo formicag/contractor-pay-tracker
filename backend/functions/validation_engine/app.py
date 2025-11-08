@@ -244,16 +244,16 @@ def lambda_handler(event, context):
 
         print("[VALIDATION_ENGINE] About to execute: return validation results dictionary")
         result = {
-            'has_critical_errors': has_critical_errors,
-            'has_warnings': len(all_warnings) > 0,
-            'valid_records': valid_records,
+            'hasCriticalErrors': has_critical_errors,
+            'hasWarnings': len(all_warnings) > 0,
+            'validatedRecords': valid_records,
             'errors': all_errors,
             'warnings': all_warnings,
-            'validation_summary': {
-                'total_records': len(records),
-                'valid_records': len(valid_records),
-                'error_count': len(all_errors),
-                'warning_count': len(all_warnings)
+            'validationSummary': {
+                'totalRecords': len(records),
+                'validRecords': len(valid_records),
+                'errorCount': len(all_errors),
+                'warningCount': len(all_warnings)
             }
         }
         print(f"[VALIDATION_ENGINE] Completed: return dict created - has_critical_errors={has_critical_errors}, valid_records={len(valid_records)}, errors={len(all_errors)}, warnings={len(all_warnings)}")
