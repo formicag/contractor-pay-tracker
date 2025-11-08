@@ -57,8 +57,8 @@ print("[VALIDATION_ENGINE] }")
         }
     """
 
-print("[VALIDATION_ENGINE] logger = StructuredLogger("validation-engine", context.request_id)")
-    logger = StructuredLogger("validation-engine", context.request_id)
+logger = StructuredLogger("validation-engine", context.aws_request_id)
+    logger = StructuredLogger("validation-engine", context.aws_request_id)
 print("[VALIDATION_ENGINE] logger.info("Validation engine invoked", event=event)")
     logger.info("Validation engine invoked", event=event)
 

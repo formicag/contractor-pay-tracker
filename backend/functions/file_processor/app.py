@@ -52,8 +52,8 @@ print("[FILE_PROCESSOR] def lambda_handler(event, context):")
 def lambda_handler(event, context):
     """Main Lambda handler"""
 
-print("[FILE_PROCESSOR] logger = StructuredLogger("file-processor", context.request_id)")
-    logger = StructuredLogger("file-processor", context.request_id)
+logger = StructuredLogger("file-processor", context.aws_request_id)
+    logger = StructuredLogger("file-processor", context.aws_request_id)
 print("[FILE_PROCESSOR] logger.info("File processor invoked", event=event)")
     logger.info("File processor invoked", event=event)
 

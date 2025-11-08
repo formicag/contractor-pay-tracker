@@ -81,10 +81,10 @@ def lambda_handler(event, context):
     print("[FILE_UPLOAD_HANDLER] ========================================")
     print(f"[FILE_UPLOAD_HANDLER] event parameter: {event}")
     print(f"[FILE_UPLOAD_HANDLER] context parameter: {context}")
-    print(f"[FILE_UPLOAD_HANDLER] context.request_id: {context.request_id}")
+    print(f"[FILE_UPLOAD_HANDLER] context.aws_request_id: {context.aws_request_id}")
 
     print("[FILE_UPLOAD_HANDLER] Creating StructuredLogger")
-    logger = StructuredLogger("file-upload-handler", context.request_id)
+    logger = StructuredLogger("file-upload-handler", context.aws_request_id)
     print(f"[FILE_UPLOAD_HANDLER] logger created: {logger}")
 
     print("[FILE_UPLOAD_HANDLER] Logging info message: File upload handler invoked")

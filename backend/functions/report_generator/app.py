@@ -35,10 +35,10 @@ def lambda_handler(event, context):
     print("[REPORT_GENERATOR] ========================================")
     print(f"[REPORT_GENERATOR] event parameter: {event}")
     print(f"[REPORT_GENERATOR] context parameter: {context}")
-    print(f"[REPORT_GENERATOR] context.request_id: {context.request_id}")
+    print(f"[REPORT_GENERATOR] context.aws_request_id: {context.aws_request_id}")
 
     print("[REPORT_GENERATOR] Creating StructuredLogger")
-    logger = StructuredLogger("report-generator", context.request_id)
+    logger = StructuredLogger("report-generator", context.aws_request_id)
     print(f"[REPORT_GENERATOR] logger created: {logger}")
 
     print("[REPORT_GENERATOR] Logging info message: Report generator invoked")
