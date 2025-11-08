@@ -17,6 +17,8 @@ print("[FLASK_APP] import uuid")
 import uuid
 print("[FLASK_APP] import json")
 import json
+print("[FLASK_APP] import logging")
+import logging
 
 print("[FLASK_APP] from flask import Flask, render_template, request, jsonify, redirect, url_for")
 from flask import Flask, render_template, request, jsonify, redirect, url_for
@@ -26,6 +28,8 @@ print("[FLASK_APP] import boto3")
 import boto3
 print("[FLASK_APP] from botocore.exceptions import ClientError")
 from botocore.exceptions import ClientError
+print("[FLASK_APP] from logging_config import setup_logging, log_request, log_response, log_errors")
+from logging_config import setup_logging, log_request, log_response, log_errors
 
 # Load environment variables
 print("[FLASK_APP] load_dotenv()")
@@ -33,6 +37,14 @@ load_dotenv()
 
 print("[FLASK_APP] app = Flask(__name__)")
 app = Flask(__name__)
+
+# Setup comprehensive logging
+print("[FLASK_APP] Setting up Flask logging")
+setup_logging(app)
+log_request(app)
+log_response(app)
+log_errors(app)
+print("[FLASK_APP] Flask logging configured")
 print("[FLASK_APP] app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max file size")
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max file size
 print("[FLASK_APP] app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'dev-secret-key-change-i")
