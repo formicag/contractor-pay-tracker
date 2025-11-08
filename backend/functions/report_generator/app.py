@@ -106,20 +106,20 @@ def lambda_handler(event, context):
             result = generate_summary_report(filters, logger)
             print(f"[REPORT_GENERATOR] Result from generate_summary_report: {result}")
 
-        print(f"[REPORT_GENERATOR] About to execute: check report_type == 'detailed'")
-        elif report_type == 'detailed':
+        if report_type == 'detailed':
+            print(f"[REPORT_GENERATOR] About to execute: check report_type == 'detailed'")
             print("[REPORT_GENERATOR] About to execute: result = generate_detailed_report(filters, logger)")
             result = generate_detailed_report(filters, logger)
             print(f"[REPORT_GENERATOR] Result from generate_detailed_report: {result}")
 
-        print(f"[REPORT_GENERATOR] About to execute: check report_type == 'contractor'")
         elif report_type == 'contractor':
+            print(f"[REPORT_GENERATOR] About to execute: check report_type == 'contractor'")
             print("[REPORT_GENERATOR] About to execute: result = generate_contractor_report(filters, logger)")
             result = generate_contractor_report(filters, logger)
             print(f"[REPORT_GENERATOR] Result from generate_contractor_report: {result}")
 
-        print(f"[REPORT_GENERATOR] About to execute: check report_type == 'period'")
         elif report_type == 'period':
+            print(f"[REPORT_GENERATOR] About to execute: check report_type == 'period'")
             print("[REPORT_GENERATOR] About to execute: result = generate_period_report(filters, logger)")
             result = generate_period_report(filters, logger)
             print(f"[REPORT_GENERATOR] Result from generate_period_report: {result}")
@@ -435,8 +435,8 @@ def query_records(period_id=None, umbrella_id=None, contractor_id=None, logger=N
         print("[QUERY_RECORDS] About to execute: extract Items from response")
         records = response.get('Items', [])
         print(f"[QUERY_RECORDS] Records extracted: {len(records)} records")
+        print("[QUERY_RECORDS] About to execute: check if period_id")
 
-    print("[QUERY_RECORDS] About to execute: check if period_id")
     elif period_id:
         # Use GSI2 for period-based queries
         print(f"[QUERY_RECORDS] About to execute: query GSI2 with period_id={period_id}")

@@ -87,57 +87,56 @@ def lambda_handler(event, context):
             print(f"[FILE_PROCESSOR] Result: extract_metadata returned = {result}")
             return result
 
-        print(f"[FILE_PROCESSOR] About to execute: check if action == 'match_period'")
         elif action == 'match_period':
+            print(f"[FILE_PROCESSOR] About to execute: check if action == 'match_period'")
             print(f"[FILE_PROCESSOR] About to execute: return match_period(event, logger)")
             result = match_period(event, logger)
             print(f"[FILE_PROCESSOR] Result: match_period returned = {result}")
             return result
 
-        print(f"[FILE_PROCESSOR] About to execute: check if action == 'check_duplicates'")
         elif action == 'check_duplicates':
+            print(f"[FILE_PROCESSOR] About to execute: check if action == 'check_duplicates'")
             print(f"[FILE_PROCESSOR] About to execute: return check_duplicates(event, logger)")
             result = check_duplicates(event, logger)
             print(f"[FILE_PROCESSOR] Result: check_duplicates returned = {result}")
             return result
 
-        print(f"[FILE_PROCESSOR] About to execute: check if action == 'supersede_existing'")
         elif action == 'supersede_existing':
             print(f"[FILE_PROCESSOR] About to execute: return supersede_existing(event, logger)")
             result = supersede_existing(event, logger)
             print(f"[FILE_PROCESSOR] Result: supersede_existing returned = {result}")
             return result
 
-        print(f"[FILE_PROCESSOR] About to execute: check if action == 'parse_records'")
         elif action == 'parse_records':
+            print(f"[FILE_PROCESSOR] About to execute: check if action == 'parse_records'")
             print(f"[FILE_PROCESSOR] About to execute: return parse_records(event, logger)")
             result = parse_records(event, logger)
             print(f"[FILE_PROCESSOR] Result: parse_records returned = {result}")
             return result
 
-        print(f"[FILE_PROCESSOR] About to execute: check if action == 'import_records'")
         elif action == 'import_records':
+            print(f"[FILE_PROCESSOR] About to execute: check if action == 'import_records'")
             print(f"[FILE_PROCESSOR] About to execute: return import_records(event, logger)")
             result = import_records(event, logger)
             print(f"[FILE_PROCESSOR] Result: import_records returned = {result}")
             return result
 
-        print(f"[FILE_PROCESSOR] About to execute: check if action == 'mark_complete'")
         elif action == 'mark_complete':
+            print(f"[FILE_PROCESSOR] About to execute: check if action == 'mark_complete'")
             print(f"[FILE_PROCESSOR] About to execute: return mark_complete(event, logger)")
             result = mark_complete(event, logger)
             print(f"[FILE_PROCESSOR] Result: mark_complete returned = {result}")
             return result
 
-        print(f"[FILE_PROCESSOR] About to execute: check if action == 'mark_error'")
         elif action == 'mark_error':
+            print(f"[FILE_PROCESSOR] About to execute: check if action == 'mark_error'")
             print(f"[FILE_PROCESSOR] About to execute: return mark_error(event, logger)")
             result = mark_error(event, logger)
             print(f"[FILE_PROCESSOR] Result: mark_error returned = {result}")
             return result
 
-        print(f"[FILE_PROCESSOR] About to execute: check if action == 'mark_failed'")
         elif action == 'mark_failed':
+            print(f"[FILE_PROCESSOR] About to execute: check if action == 'mark_failed'")
             print(f"[FILE_PROCESSOR] About to execute: return mark_failed(event, logger)")
             result = mark_failed(event, logger)
             print(f"[FILE_PROCESSOR] Result: mark_failed returned = {result}")

@@ -253,10 +253,6 @@ class DynamoDBClient:
         response = self.table.query(
             IndexName='GSI1',
             KeyConditionExpression='GSI1PK = :pk AND begins_with(GSI1SK, :sk_prefix)',
-            ExpressionAttributeValues={
-                ':pk': gsi1pk_value,
-                ':sk_prefix': 'RECORD#'
-            },
             FilterExpression='IsActive = :is_active AND RecordType = :record_type',
             ExpressionAttributeValues={
                 ':pk': gsi1pk_value,

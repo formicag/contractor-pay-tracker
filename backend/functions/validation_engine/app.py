@@ -178,7 +178,7 @@ def lambda_handler(event, context):
                 )
                 print(f"[VALIDATION_ENGINE] Completed: validator.validate_umbrella_association - result keys = {list(assoc_result.keys())}")
 
-                print(f"[VALIDATION_ENGINE] About to execute: association_id = assoc_result.get('association', {}).get('AssociationID')")
+                print(f"[VALIDATION_ENGINE] About to execute: association_id = assoc_result.get('association', {{}}).get('AssociationID')")
                 association_id = assoc_result.get('association', {}).get('AssociationID')
                 print(f"[VALIDATION_ENGINE] Completed: association_id = {association_id}")
 
