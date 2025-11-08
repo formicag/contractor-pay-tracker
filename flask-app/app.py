@@ -210,18 +210,25 @@ def inject_globals():
 
 
 if __name__ == '__main__':
-    # Find available port
-    port = find_available_port(start_port=5555)
+    # Use environment variable for port, or find available port
+    # This ensures consistent port across Flask reloader restarts
+    if 'FLASK_RUN_PORT' not in os.environ:
+        port = find_available_port(start_port=5555)
+        os.environ['FLASK_RUN_PORT'] = str(port)
+    else:
+        port = int(os.environ['FLASK_RUN_PORT'])
 
-    print("\n" + "="*60)
-    print("🚀 Contractor Pay Tracker - Flask App")
-    print("="*60)
-    print(f"\n✅ Server starting on http://127.0.0.1:{port}")
-    print(f"✅ Local access: http://localhost:{port}")
-    print(f"\n📁 Upload files: http://localhost:{port}/upload")
-    print(f"📊 View files: http://localhost:{port}/files")
-    print(f"\n⚠️  Press CTRL+C to stop the server")
-    print("="*60 + "\n")
+    # Only print banner once (not on reloader restart)
+    if os.environ.get('WERKZEUG_RUN_MAIN') != 'true':
+        print("\n" + "="*60)
+        print("🚀 Contractor Pay Tracker - Flask App")
+        print("="*60)
+        print(f"\n✅ Server starting on http://127.0.0.1:{port}")
+        print(f"✅ Local access: http://localhost:{port}")
+        print(f"\n📁 Upload files: http://localhost:{port}/upload")
+        print(f"📊 View files: http://localhost:{port}/files")
+        print(f"\n⚠️  Press CTRL+C to stop the server")
+        print("="*60 + "\n")
 
     app.run(
         host='127.0.0.1',
