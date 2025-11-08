@@ -276,8 +276,26 @@ def match_period(event: dict, logger: StructuredLogger) -> dict:
                 print("[FILE_PROCESSOR] About to execute: raise ValueError for missing umbrella company")
                 raise ValueError(f"Could not determine umbrella company. No umbrella_code in filename and umbrella_id '{umbrella_id_from_meta}' not found in database")
         else:
-            print("[FILE_PROCESSOR] About to execute: raise ValueError for missing umbrella company")
-            raise ValueError("Could not determine umbrella company from filename or metadata. Please ensure filename contains umbrella company code (e.g., NASA, ABTG)")
+            print("[FILE_PROCESSOR] Fallback 2: Query for default/first umbrella company")
+            # Fallback 2: If no umbrella code and no umbrella_id, try to get the first active umbrella
+            response = dynamodb_client.table.scan(
+                FilterExpression='begins_with(PK, :pk_prefix) AND SK = :sk AND #active = :active',
+                ExpressionAttributeNames={'#active': 'IsActive'},
+                ExpressionAttributeValues={
+                    ':pk_prefix': 'UMBRELLA#',
+                    ':sk': 'PROFILE',
+                    ':active': True
+                },
+                Limit=1
+            )
+            if response.get('Items'):
+                umbrella = response['Items'][0]
+                umbrella_id = umbrella['UmbrellaID']
+                umbrella_code = umbrella.get('UmbrellaCode', 'UNKNOWN')
+                print(f"[FILE_PROCESSOR] Successfully retrieved default umbrella: {umbrella_code} ({umbrella_id})")
+            else:
+                print("[FILE_PROCESSOR] About to execute: raise ValueError for missing umbrella company - no fallback available")
+                raise ValueError("Could not determine umbrella company from filename or metadata, and no active umbrella companies found in database")
     else:
         # Normal path: we have umbrella_code from filename
 
