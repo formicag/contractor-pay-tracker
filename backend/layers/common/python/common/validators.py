@@ -323,7 +323,7 @@ class ValidationEngine:
             print(f"[FIND_CONTRACTOR] Retrieved {len(contractors)} contractors from database")
 
         # Fuzzy match
-        threshold = int(self.params.get('NAME_MATCH_THRESHOLD', 85))
+        threshold = int(self.params.get('NAME_MATCH_THRESHOLD', 75))
         print(f"[FIND_CONTRACTOR] NAME_MATCH_THRESHOLD: {threshold}")
 
         print("[FIND_CONTRACTOR] Creating FuzzyMatcher instance")
