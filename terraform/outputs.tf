@@ -27,3 +27,13 @@ output "cleanup_handler_arn" {
   description = "Cleanup handler Lambda ARN"
   value       = aws_lambda_function.cleanup_handler.arn
 }
+
+output "step_function_arn" {
+  description = "Step Functions state machine ARN"
+  value       = aws_sfn_state_machine.contractor_pay_workflow.arn
+}
+
+output "step_function_name" {
+  description = "Step Functions state machine name"
+  value       = aws_sfn_state_machine.contractor_pay_workflow.name
+}
