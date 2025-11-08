@@ -53,7 +53,7 @@ class FuzzyMatcher:
             return None
 
         print(f"[FIND_BEST_MATCH] Normalizing search_name")
-        search_normalized = self._normalize_name(search_name)
+        search_normalized = self.normalize_name(search_name)
         print(f"[FIND_BEST_MATCH] Normalized search_name: {search_normalized}")
 
         best_match = None
@@ -141,7 +141,7 @@ class FuzzyMatcher:
         return result
 
     @staticmethod
-    def _normalize_name(name: str) -> str:
+    def normalize_name(name: str) -> str:
         """
         Normalize name for comparison
 
@@ -183,11 +183,11 @@ class FuzzyMatcher:
         print(f"[CALCULATE_SIMILARITY] Called with name1={name1}, name2={name2}")
 
         print(f"[CALCULATE_SIMILARITY] Normalizing name1")
-        normalized1 = self._normalize_name(name1)
+        normalized1 = self.normalize_name(name1)
         print(f"[CALCULATE_SIMILARITY] normalized1={normalized1}")
 
         print(f"[CALCULATE_SIMILARITY] Normalizing name2")
-        normalized2 = self._normalize_name(name2)
+        normalized2 = self.normalize_name(name2)
         print(f"[CALCULATE_SIMILARITY] normalized2={normalized2}")
 
         print(f"[CALCULATE_SIMILARITY] Calculating fuzz.ratio")

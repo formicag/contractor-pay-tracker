@@ -76,7 +76,7 @@ class PayFileParser:
         if date_match:
             date_str = date_match.group(1)
             print(f"[EXTRACT_METADATA] Extracted date string: {date_str}")
-            submission_date = datetime.strptime(date_str, '%d%m%Y').strftime('%Y-%m-%d')
+            submission_date = date_str
             print(f"[EXTRACT_METADATA] Parsed submission_date: {submission_date}")
         else:
             print(f"[EXTRACT_METADATA] No date found in filename")
@@ -203,7 +203,7 @@ class PayFileParser:
             elif header == 'unit' or 'days' in header:
                 print(f"[GET_COLUMN_MAPPING] Matched 'unit' at index {idx}")
                 column_map['unit'] = idx
-            elif header == 'rate' and 'day' in header:
+            elif 'rate' in header.lower() and 'day' in header.lower():
                 print(f"[GET_COLUMN_MAPPING] Matched 'rate' at index {idx}")
                 column_map['rate'] = idx
             elif header == 'per':
@@ -312,7 +312,7 @@ class PayFileParser:
 
         # Determine record type
         print(f"[PARSE_ROW] Determining record type from notes")
-        record_type = 'STANDARD'
+        record_type = 'NORMAL'
         if 'overtime' in notes.lower():
             print(f"[PARSE_ROW] Found 'overtime' in notes, setting record_type=OVERTIME")
             record_type = 'OVERTIME'
@@ -324,7 +324,7 @@ class PayFileParser:
 
         # Calculate final total_hours if not provided
         print(f"[PARSE_ROW] Calculating final total_hours")
-        final_total_hours = float(total_hours) if total_hours else float(unit_days * Decimal('7.5'))
+        final_total_hours = float(total_hours) if total_hours else float(unit_days * Decimal('8'))
         print(f"[PARSE_ROW] final_total_hours={final_total_hours}")
 
         record = {
