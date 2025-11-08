@@ -319,11 +319,28 @@ def handle_api_upload(event, logger: StructuredLogger):
     if STEP_FUNCTION_ARN:
         print("[FILE_UPLOAD_HANDLER] STEP_FUNCTION_ARN is set, triggering Step Functions")
         try:
+            print("[FILE_UPLOAD_HANDLER] Extracting umbrella_code from filename")
+            # Extract umbrella company code from filename
+            umbrella_code = None
+            filename_upper = filename.upper()
+            known_codes = ['NASA', 'ABTG', 'GCI', 'NASSTAR']
+            for code in known_codes:
+                if code in filename_upper:
+                    umbrella_code = code
+                    print(f"[FILE_UPLOAD_HANDLER] Found umbrella_code: {umbrella_code}")
+                    break
+
             print("[FILE_UPLOAD_HANDLER] Building Step Functions execution input")
             sfn_input = {
                 'fileId': file_id,
                 's3_bucket': S3_BUCKET,
-                'key': s3_key
+                'key': s3_key,
+                'metadata': {
+                    'file_id': file_id,
+                    'umbrella_code': umbrella_code,
+                    'submission_date': None,
+                    'filename': filename
+                }
             }
             print(f"[FILE_UPLOAD_HANDLER] sfn_input: {sfn_input}")
 
@@ -559,11 +576,28 @@ def handle_s3_event(event, logger: StructuredLogger):
             if STEP_FUNCTION_ARN:
                 print("[FILE_UPLOAD_HANDLER] STEP_FUNCTION_ARN is set, triggering workflow")
                 try:
+                    print("[FILE_UPLOAD_HANDLER] Extracting umbrella_code from original_filename")
+                    # Extract umbrella company code from filename
+                    umbrella_code = None
+                    filename_upper = original_filename.upper()
+                    known_codes = ['NASA', 'ABTG', 'GCI', 'NASSTAR']
+                    for code in known_codes:
+                        if code in filename_upper:
+                            umbrella_code = code
+                            print(f"[FILE_UPLOAD_HANDLER] Found umbrella_code: {umbrella_code}")
+                            break
+
                     print("[FILE_UPLOAD_HANDLER] Building Step Functions input")
                     sfn_input = {
                         'fileId': file_id,
                         's3_bucket': s3_bucket,
-                        'key': s3_key
+                        'key': s3_key,
+                        'metadata': {
+                            'file_id': file_id,
+                            'umbrella_code': umbrella_code,
+                            'submission_date': None,
+                            'filename': original_filename
+                        }
                     }
                     print(f"[FILE_UPLOAD_HANDLER] sfn_input: {sfn_input}")
 
