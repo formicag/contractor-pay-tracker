@@ -23,7 +23,7 @@ Parameters:
 
 Globals:
   Function:
-    Runtime: python3.11
+    Runtime: python3.12
     Architectures:
       - arm64
     Timeout: 30
@@ -169,11 +169,11 @@ Resources:
       Description: Common utilities (DynamoDB, S3, fuzzy matching)
       ContentUri: layers/common/
       CompatibleRuntimes:
-        - python3.11
+        - python3.12
       CompatibleArchitectures:
         - arm64
     Metadata:
-      BuildMethod: python3.11
+      BuildMethod: python3.12
 
   # ============================================================================
   # LAMBDA FUNCTIONS

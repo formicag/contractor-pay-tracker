@@ -1,0 +1,87 @@
+name: Deploy to AWS
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Environment to deploy to'
+        required: true
+        default: 'development'
+        type: choice
+        options:
+          - development
+          - production
+
+env:
+  AWS_REGION: eu-west-2
+
+jobs:
+  deploy:
+    name: Deploy SAM Application
+    runs-on: ubuntu-latest
+    environment: ${{ github.event.inputs.environment || 'development' }}
+
+    permissions:
+      id-token: write
+      contents: read
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Set up AWS SAM CLI
+        uses: aws-actions/setup-sam@v2
+        with:
+          use-installer: true
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          role-session-name: GitHubActions
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: SAM Build
+        run: |
+          cd backend
+          sam build
+
+      - name: SAM Deploy
+        run: |
+          cd backend
+          sam deploy \
+            --stack-name contractor-pay-tracker-${{ github.event.inputs.environment || 'development' }} \
+            --region ${{ env.AWS_REGION }} \
+            --capabilities CAPABILITY_IAM \
+            --parameter-overrides \
+              Environment=${{ github.event.inputs.environment || 'development' }} \
+              LogLevel=INFO \
+            --no-confirm-changeset \
+            --no-fail-on-empty-changeset
+
+      - name: Get Stack Outputs
+        id: outputs
+        run: |
+          cd backend
+          aws cloudformation describe-stacks \
+            --stack-name contractor-pay-tracker-${{ github.event.inputs.environment || 'development' }} \
+            --region ${{ env.AWS_REGION }} \
+            --query 'Stacks[0].Outputs' \
+            --output json > stack-outputs.json
+
+          echo "Stack outputs saved"
+          cat stack-outputs.json
+
+      - name: Upload Stack Outputs
+        uses: actions/upload-artifact@v4
+        with:
+          name: stack-outputs
+          path: backend/stack-outputs.json
