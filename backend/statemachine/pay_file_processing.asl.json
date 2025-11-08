@@ -6,10 +6,12 @@
       "Type": "Task",
       "Resource": "${FileProcessorFunctionArn}",
       "Parameters": {
-        "file_id.$": "$.file_id",
-        "action": "extract_metadata"
+        "action": "extract_metadata",
+        "fileId.$": "$.fileId",
+        "bucket.$": "$.s3_bucket",
+        "key.$": "$.key"
       },
-      "ResultPath": "$.metadata_result",
+      "ResultPath": "$.metadata",
       "Next": "MatchPeriod",
       "Catch": [
         {
@@ -23,11 +25,11 @@
       "Type": "Task",
       "Resource": "${FileProcessorFunctionArn}",
       "Parameters": {
-        "file_id.$": "$.file_id",
-        "metadata.$": "$.metadata_result",
-        "action": "match_period"
+        "action": "match_period",
+        "fileId.$": "$.fileId",
+        "metadata.$": "$.metadata"
       },
-      "ResultPath": "$.period_result",
+      "ResultPath": "$.period",
       "Next": "CheckDuplicates",
       "Catch": [
         {
@@ -41,13 +43,12 @@
       "Type": "Task",
       "Resource": "${FileProcessorFunctionArn}",
       "Parameters": {
-        "file_id.$": "$.file_id",
-        "umbrella_id.$": "$.period_result.umbrella_id",
-        "period_id.$": "$.period_result.period_id",
-        "action": "check_duplicates"
+        "action": "check_duplicates",
+        "fileId.$": "$.fileId",
+        "period.$": "$.period"
       },
-      "ResultPath": "$.duplicate_check",
-      "Next": "DuplicateChoice",
+      "ResultPath": "$.duplicates",
+      "Next": "DuplicatesFound",
       "Catch": [
         {
           "ErrorEquals": ["States.ALL"],
@@ -56,39 +57,48 @@
         }
       ]
     },
-    "DuplicateChoice": {
+    "DuplicatesFound": {
       "Type": "Choice",
       "Choices": [
         {
-          "Variable": "$.duplicate_check.duplicate_found",
+          "Variable": "$.duplicates.hasDuplicates",
           "BooleanEquals": true,
-          "Next": "AutoSupersede"
+          "Next": "SupersedeExisting"
         }
       ],
       "Default": "ParseRecords"
     },
-    "AutoSupersede": {
+    "SupersedeExisting": {
       "Type": "Task",
       "Resource": "${FileProcessorFunctionArn}",
       "Parameters": {
-        "file_id.$": "$.file_id",
-        "existing_file_id.$": "$.duplicate_check.existing_file_id",
-        "action": "supersede_existing"
+        "action": "supersede_existing",
+        "fileId.$": "$.fileId",
+        "existing_file_id.$": "$.duplicates.existing_file_id"
       },
-      "ResultPath": "$.supersede_result",
+      "ResultPath": "$.superseded",
       "Next": "ParseRecords",
+      "Catch": [
+        {
+          "ErrorEquals": ["States.ALL"],
+          "ResultPath": "$.error",
+          "Next": "ProcessingFailed"
+        }
+      ],
       "Comment": "Automatically supersede old file - no user prompt (Gemini improvement #4)"
     },
     "ParseRecords": {
       "Type": "Task",
       "Resource": "${FileProcessorFunctionArn}",
       "Parameters": {
-        "file_id.$": "$.file_id",
-        "umbrella_id.$": "$.period_result.umbrella_id",
-        "period_id.$": "$.period_result.period_id",
-        "action": "parse_records"
+        "action": "parse_records",
+        "fileId.$": "$.fileId",
+        "bucket.$": "$.s3_bucket",
+        "key.$": "$.key",
+        "metadata.$": "$.metadata",
+        "period.$": "$.period"
       },
-      "ResultPath": "$.parse_result",
+      "ResultPath": "$.parsedRecords",
       "Next": "ValidateRecords",
       "Catch": [
         {
@@ -102,13 +112,11 @@
       "Type": "Task",
       "Resource": "${ValidationEngineFunctionArn}",
       "Parameters": {
-        "file_id.$": "$.file_id",
-        "umbrella_id.$": "$.period_result.umbrella_id",
-        "period_id.$": "$.period_result.period_id",
-        "records.$": "$.parse_result.records"
+        "fileId.$": "$.fileId",
+        "records.$": "$.parsedRecords.records"
       },
-      "ResultPath": "$.validation_result",
-      "Next": "ValidationChoice",
+      "ResultPath": "$.validation",
+      "Next": "HasCriticalErrors",
       "Catch": [
         {
           "ErrorEquals": ["States.ALL"],
@@ -118,11 +126,11 @@
       ],
       "Comment": "Uses contractor_umbrella_associations for many-to-many validation (Gemini improvement #1)"
     },
-    "ValidationChoice": {
+    "HasCriticalErrors": {
       "Type": "Choice",
       "Choices": [
         {
-          "Variable": "$.validation_result.has_critical_errors",
+          "Variable": "$.validation.hasCriticalErrors",
           "BooleanEquals": true,
           "Next": "ProcessingFailedWithErrors",
           "Comment": "Critical errors block import - NO data imported (Gemini improvement #2)"
@@ -134,50 +142,77 @@
       "Type": "Task",
       "Resource": "${FileProcessorFunctionArn}",
       "Parameters": {
-        "file_id.$": "$.file_id",
-        "validated_records.$": "$.validation_result.valid_records",
-        "has_warnings.$": "$.validation_result.has_warnings",
-        "action": "import_records"
+        "action": "import_records",
+        "fileId.$": "$.fileId",
+        "records.$": "$.parsedRecords.records",
+        "validation.$": "$.validation"
       },
-      "ResultPath": "$.import_result",
+      "ResultPath": "$.import",
       "Next": "ProcessingComplete",
+      "Catch": [
+        {
+          "ErrorEquals": ["States.ALL"],
+          "ResultPath": "$.error",
+          "Next": "ProcessingFailed"
+        }
+      ],
       "Comment": "Warnings allow import with COMPLETED_WITH_WARNINGS status (Gemini improvement #2)"
     },
     "ProcessingComplete": {
       "Type": "Task",
       "Resource": "${FileProcessorFunctionArn}",
       "Parameters": {
-        "file_id.$": "$.file_id",
-        "import_result.$": "$.import_result",
-        "has_warnings.$": "$.validation_result.has_warnings",
-        "was_supersede.$": "$.duplicate_check.duplicate_found",
-        "action": "mark_complete"
+        "action": "mark_complete",
+        "fileId.$": "$.fileId",
+        "import.$": "$.import"
       },
-      "ResultPath": "$.final_result",
-      "End": true
+      "ResultPath": "$.completed",
+      "Next": "Success",
+      "Catch": [
+        {
+          "ErrorEquals": ["States.ALL"],
+          "ResultPath": "$.error",
+          "Next": "ProcessingFailed"
+        }
+      ]
     },
     "ProcessingFailedWithErrors": {
       "Type": "Task",
       "Resource": "${FileProcessorFunctionArn}",
       "Parameters": {
-        "file_id.$": "$.file_id",
-        "validation_errors.$": "$.validation_result.errors",
-        "action": "mark_error"
+        "action": "mark_error",
+        "fileId.$": "$.fileId",
+        "validation_errors.$": "$.validation.errors"
       },
-      "ResultPath": "$.final_result",
-      "End": true,
+      "ResultPath": "$.errorMarked",
+      "Next": "Failed",
+      "Catch": [
+        {
+          "ErrorEquals": ["States.ALL"],
+          "ResultPath": "$.error",
+          "Next": "ProcessingFailed"
+        }
+      ],
       "Comment": "Status=ERROR, no records imported"
     },
     "ProcessingFailed": {
       "Type": "Task",
       "Resource": "${FileProcessorFunctionArn}",
       "Parameters": {
-        "file_id.$": "$.file_id",
-        "error.$": "$.error",
-        "action": "mark_failed"
+        "action": "mark_failed",
+        "fileId.$": "$.fileId",
+        "error.$": "$.error"
       },
-      "ResultPath": "$.final_result",
-      "End": true
+      "ResultPath": "$.errorMarked",
+      "Next": "Failed"
+    },
+    "Success": {
+      "Type": "Succeed"
+    },
+    "Failed": {
+      "Type": "Fail",
+      "Error": "WorkflowFailed",
+      "Cause": "The file processing workflow encountered an error"
     }
   }
 }
