@@ -191,7 +191,11 @@ class ValidationEngine:
 
         if record_type == 'OVERTIME':
             print("[VALIDATE_RECORD] record_type is OVERTIME, calling validate_overtime_rate()")
-            overtime_result = self.validate_overtime_rate(record)
+            overtime_result = self.validate_overtime_rate(
+                record,
+                contractor_id,
+                period_data
+            )
             print(f"[VALIDATE_RECORD] validate_overtime_rate returned: {overtime_result}")
 
             if not overtime_result['valid']:
@@ -539,56 +543,133 @@ class ValidationEngine:
         print("[VALIDATE_VAT] VAT validation passed - returning valid=True")
         return {'valid': True}
 
-    def validate_overtime_rate(self, record: Dict) -> Dict:
+    def validate_overtime_rate(
+        self,
+        record: Dict,
+        contractor_id: str,
+        period_data: Dict
+    ) -> Dict:
         """
         Rule 5: Validate overtime rate is 1.5x normal rate
         CRITICAL error if incorrect (with tolerance)
+
+        Args:
+            record: Pay record dict with overtime day_rate
+            contractor_id: Contractor UUID
+            period_data: Pay period information
+
+        Returns:
+            Dict with 'valid' bool and optional 'error' dict
         """
         print("[VALIDATE_OVERTIME_RATE] Starting validate_overtime_rate()")
+        print(f"[VALIDATE_OVERTIME_RATE] contractor_id={contractor_id}, period_id={period_data.get('PeriodNumber')}")
 
-        # For overtime records, we need to find the normal rate
-        # This is complex - for now, validate rate is reasonable
-        # TODO: Implement proper overtime validation with rate history
-
+        print("[VALIDATE_OVERTIME_RATE] About to execute: Extract overtime day_rate from record")
         day_rate_str = record['day_rate']
         print(f"[VALIDATE_OVERTIME_RATE] Retrieved day_rate string: {day_rate_str}")
 
-        day_rate = Decimal(str(day_rate_str))
-        print(f"[VALIDATE_OVERTIME_RATE] Converted day_rate to Decimal: {day_rate}")
+        overtime_rate = Decimal(str(day_rate_str))
+        print(f"[VALIDATE_OVERTIME_RATE] Converted overtime_rate to Decimal: {overtime_rate}")
 
+        print("[VALIDATE_OVERTIME_RATE] About to execute: Get overtime multiplier from system params")
         multiplier_value = self.params.get('OVERTIME_MULTIPLIER', 1.5)
         print(f"[VALIDATE_OVERTIME_RATE] Retrieved OVERTIME_MULTIPLIER from params: {multiplier_value}")
 
         multiplier = Decimal(str(multiplier_value))
         print(f"[VALIDATE_OVERTIME_RATE] Converted multiplier to Decimal: {multiplier}")
 
+        print("[VALIDATE_OVERTIME_RATE] About to execute: Get tolerance percent from system params")
         tolerance_percent_value = self.params.get('OVERTIME_TOLERANCE_PERCENT', 2.0)
         print(f"[VALIDATE_OVERTIME_RATE] Retrieved OVERTIME_TOLERANCE_PERCENT from params: {tolerance_percent_value}")
 
         tolerance_percent = Decimal(str(tolerance_percent_value))
         print(f"[VALIDATE_OVERTIME_RATE] Converted tolerance_percent to Decimal: {tolerance_percent}")
 
-        # For now, just check rate is higher than typical
-        # Full implementation would compare to contractor's normal rate
-        min_overtime_rate = Decimal('300')
-        print(f"[VALIDATE_OVERTIME_RATE] Minimum overtime rate threshold: {min_overtime_rate}")
+        # Lookup contractor's normal rate from current period
+        print("[VALIDATE_OVERTIME_RATE] About to execute: Query contractor's normal rate for current period")
+        period_id = str(period_data.get('PeriodNumber'))
+        print(f"[VALIDATE_OVERTIME_RATE] period_id={period_id}")
 
-        if day_rate < min_overtime_rate:
-            print(f"[VALIDATE_OVERTIME_RATE] day_rate ({day_rate}) < minimum ({min_overtime_rate}) - returning error")
+        print(f"[VALIDATE_OVERTIME_RATE] About to execute: db.get_contractor_rate_in_period({contractor_id}, {period_id})")
+        normal_rate = self.db.get_contractor_rate_in_period(contractor_id, period_id)
+        print(f"[VALIDATE_OVERTIME_RATE] Retrieved normal_rate from current period: {normal_rate}")
+
+        # If not found in current period, try to get from recent pay history
+        if not normal_rate:
+            print("[VALIDATE_OVERTIME_RATE] Normal rate not found in current period, checking recent pay history")
+            print(f"[VALIDATE_OVERTIME_RATE] About to execute: db.get_contractor_pay_records({contractor_id}, limit=5)")
+            recent_records = self.db.get_contractor_pay_records(contractor_id, limit=5)
+            print(f"[VALIDATE_OVERTIME_RATE] Retrieved {len(recent_records)} recent records")
+
+            if recent_records:
+                print("[VALIDATE_OVERTIME_RATE] About to execute: Extract DayRate from most recent STANDARD record")
+                normal_rate = recent_records[0].get('DayRate')
+                print(f"[VALIDATE_OVERTIME_RATE] Extracted normal_rate from most recent record: {normal_rate}")
+            else:
+                print("[VALIDATE_OVERTIME_RATE] No recent pay records found for contractor")
+
+        # If we still don't have normal rate, we cannot validate
+        if not normal_rate:
+            print("[VALIDATE_OVERTIME_RATE] Cannot validate overtime rate - no normal rate found in system")
+            print("[VALIDATE_OVERTIME_RATE] Returning error - unable to determine normal rate")
             error_dict = {
                 'valid': False,
                 'error': {
                     'error_type': 'INVALID_OVERTIME_RATE',
                     'severity': 'CRITICAL',
                     'row_number': record.get('row_number'),
-                    'error_message': f"CRITICAL: Overtime rate £{day_rate:.2f} seems too low (should be 1.5x normal rate)",
-                    'suggested_fix': "Verify overtime rate is calculated correctly"
+                    'employee_id': record.get('employee_id'),
+                    'error_message': f"CRITICAL: Cannot validate overtime rate £{overtime_rate:.2f} - no normal rate found for contractor in system",
+                    'suggested_fix': "Verify contractor has a STANDARD record in this period or previous periods, or verify overtime rate manually"
                 }
             }
             print(f"[VALIDATE_OVERTIME_RATE] Returning error: {error_dict}")
             return error_dict
 
-        print("[VALIDATE_OVERTIME_RATE] Overtime rate validation passed - returning valid=True")
+        print("[VALIDATE_OVERTIME_RATE] About to execute: Convert normal_rate to Decimal for calculation")
+        normal_rate = Decimal(str(normal_rate))
+        print(f"[VALIDATE_OVERTIME_RATE] Converted normal_rate to Decimal: {normal_rate}")
+
+        print("[VALIDATE_OVERTIME_RATE] About to execute: Calculate expected overtime rate")
+        expected_overtime_rate = normal_rate * multiplier
+        print(f"[VALIDATE_OVERTIME_RATE] Calculated expected_overtime_rate: {normal_rate} * {multiplier} = {expected_overtime_rate}")
+
+        print("[VALIDATE_OVERTIME_RATE] About to execute: Calculate tolerance amount")
+        tolerance_amount = expected_overtime_rate * (tolerance_percent / Decimal('100'))
+        print(f"[VALIDATE_OVERTIME_RATE] Calculated tolerance_amount: {expected_overtime_rate} * ({tolerance_percent}/100) = {tolerance_amount}")
+
+        print("[VALIDATE_OVERTIME_RATE] About to execute: Calculate min and max acceptable overtime rates")
+        min_acceptable_rate = expected_overtime_rate - tolerance_amount
+        max_acceptable_rate = expected_overtime_rate + tolerance_amount
+        print(f"[VALIDATE_OVERTIME_RATE] Acceptable range: {min_acceptable_rate:.2f} to {max_acceptable_rate:.2f}")
+
+        print("[VALIDATE_OVERTIME_RATE] About to execute: Calculate actual difference")
+        difference = abs(overtime_rate - expected_overtime_rate)
+        print(f"[VALIDATE_OVERTIME_RATE] Calculated difference: abs({overtime_rate} - {expected_overtime_rate}) = {difference}")
+
+        print(f"[VALIDATE_OVERTIME_RATE] About to execute: Check if overtime_rate {overtime_rate} is within acceptable range")
+        if overtime_rate < min_acceptable_rate or overtime_rate > max_acceptable_rate:
+            print(f"[VALIDATE_OVERTIME_RATE] Overtime rate {overtime_rate} is OUTSIDE acceptable range - returning error")
+
+            percent_diff = (difference / expected_overtime_rate) * Decimal('100')
+            print(f"[VALIDATE_OVERTIME_RATE] Calculated percent_diff: {percent_diff:.2f}%")
+
+            error_dict = {
+                'valid': False,
+                'error': {
+                    'error_type': 'INVALID_OVERTIME_RATE',
+                    'severity': 'CRITICAL',
+                    'row_number': record.get('row_number'),
+                    'employee_id': record.get('employee_id'),
+                    'error_message': f"CRITICAL: Overtime rate £{overtime_rate:.2f} is incorrect. Normal rate: £{normal_rate:.2f}, Expected overtime (1.5x): £{expected_overtime_rate:.2f} (±{tolerance_percent}% tolerance)",
+                    'suggested_fix': f"Correct overtime rate should be £{expected_overtime_rate:.2f} (actual difference: {percent_diff:.2f}%)"
+                }
+            }
+            print(f"[VALIDATE_OVERTIME_RATE] Returning error: {error_dict}")
+            return error_dict
+
+        print(f"[VALIDATE_OVERTIME_RATE] Overtime rate {overtime_rate} is within acceptable range - validation passed")
+        print("[VALIDATE_OVERTIME_RATE] Returning valid=True")
         return {'valid': True}
 
     def check_rate_change(
@@ -600,13 +681,110 @@ class ValidationEngine:
         """
         Rule 6: Check for significant rate changes
         WARNING if rate changed > 5% from previous period
+
+        Args:
+            contractor_id: Contractor UUID
+            new_rate: Current day rate from record
+            period_data: Current pay period information
+
+        Returns:
+            Dict with optional 'warning' dict (None if no warning)
         """
         print("[CHECK_RATE_CHANGE] Starting check_rate_change()")
         print(f"[CHECK_RATE_CHANGE] contractor_id={contractor_id}, new_rate={new_rate}")
 
-        # TODO: Implement rate history lookup
-        # For now, return no warning
-        print("[CHECK_RATE_CHANGE] Rate history lookup not yet implemented")
+        print("[CHECK_RATE_CHANGE] About to execute: Get current period number")
+        current_period_num = period_data.get('PeriodNumber')
+        print(f"[CHECK_RATE_CHANGE] current_period_num={current_period_num}")
+
+        print("[CHECK_RATE_CHANGE] About to execute: Check if current_period_num is valid")
+        if not current_period_num or current_period_num <= 1:
+            print(f"[CHECK_RATE_CHANGE] Period {current_period_num} is first period or invalid, no previous period to compare")
+            print("[CHECK_RATE_CHANGE] Returning no warning (warning=None)")
+            return {'warning': None}
+
+        print("[CHECK_RATE_CHANGE] About to execute: Calculate previous period number")
+        previous_period_num = current_period_num - 1
+        print(f"[CHECK_RATE_CHANGE] previous_period_num={previous_period_num}")
+
+        print("[CHECK_RATE_CHANGE] About to execute: Query contractor's rate from previous period")
+        print(f"[CHECK_RATE_CHANGE] Calling db.get_contractor_rate_in_period({contractor_id}, {previous_period_num})")
+        previous_rate = self.db.get_contractor_rate_in_period(contractor_id, str(previous_period_num))
+        print(f"[CHECK_RATE_CHANGE] Retrieved previous_rate from period {previous_period_num}: {previous_rate}")
+
+        print("[CHECK_RATE_CHANGE] About to execute: Check if previous_rate exists")
+        if not previous_rate:
+            print(f"[CHECK_RATE_CHANGE] No previous rate found for period {previous_period_num}")
+            print("[CHECK_RATE_CHANGE] This might be contractor's first period, checking further back")
+
+            print("[CHECK_RATE_CHANGE] About to execute: Query recent pay records as fallback")
+            print(f"[CHECK_RATE_CHANGE] Calling db.get_contractor_pay_records({contractor_id}, limit=5)")
+            recent_records = self.db.get_contractor_pay_records(contractor_id, limit=5)
+            print(f"[CHECK_RATE_CHANGE] Retrieved {len(recent_records)} recent records")
+
+            if recent_records:
+                print("[CHECK_RATE_CHANGE] About to execute: Extract DayRate from most recent record")
+                previous_rate = recent_records[0].get('DayRate')
+                print(f"[CHECK_RATE_CHANGE] Extracted previous_rate from most recent record: {previous_rate}")
+            else:
+                print("[CHECK_RATE_CHANGE] No previous pay records found - this is contractor's first payment")
+                print("[CHECK_RATE_CHANGE] Returning no warning (warning=None)")
+                return {'warning': None}
+
+        print("[CHECK_RATE_CHANGE] About to execute: Convert rates to Decimal for comparison")
+        new_rate_decimal = Decimal(str(new_rate))
+        print(f"[CHECK_RATE_CHANGE] new_rate_decimal={new_rate_decimal}")
+
+        previous_rate_decimal = Decimal(str(previous_rate))
+        print(f"[CHECK_RATE_CHANGE] previous_rate_decimal={previous_rate_decimal}")
+
+        print("[CHECK_RATE_CHANGE] About to execute: Calculate rate change amount and percentage")
+        rate_change_amount = new_rate_decimal - previous_rate_decimal
+        print(f"[CHECK_RATE_CHANGE] rate_change_amount={new_rate_decimal} - {previous_rate_decimal} = {rate_change_amount}")
+
+        print("[CHECK_RATE_CHANGE] About to execute: Check if previous_rate is zero to avoid division by zero")
+        if previous_rate_decimal == 0:
+            print("[CHECK_RATE_CHANGE] previous_rate is zero, cannot calculate percentage change")
+            print("[CHECK_RATE_CHANGE] Returning no warning (warning=None)")
+            return {'warning': None}
+
+        print("[CHECK_RATE_CHANGE] About to execute: Calculate percentage change")
+        rate_change_percent = (rate_change_amount / previous_rate_decimal) * Decimal('100')
+        print(f"[CHECK_RATE_CHANGE] rate_change_percent=({rate_change_amount}/{previous_rate_decimal}) * 100 = {rate_change_percent:.2f}%")
+
+        print("[CHECK_RATE_CHANGE] About to execute: Get alert threshold from system params")
+        alert_threshold = Decimal(str(self.params.get('RATE_CHANGE_ALERT_PERCENT', 5.0)))
+        print(f"[CHECK_RATE_CHANGE] alert_threshold={alert_threshold}%")
+
+        print("[CHECK_RATE_CHANGE] About to execute: Check if absolute rate change exceeds threshold")
+        abs_change_percent = abs(rate_change_percent)
+        print(f"[CHECK_RATE_CHANGE] abs_change_percent={abs_change_percent:.2f}%")
+
+        print(f"[CHECK_RATE_CHANGE] About to execute: Compare {abs_change_percent:.2f}% > {alert_threshold}%")
+        if abs_change_percent > alert_threshold:
+            print(f"[CHECK_RATE_CHANGE] Rate change {abs_change_percent:.2f}% EXCEEDS threshold {alert_threshold}% - generating warning")
+
+            print("[CHECK_RATE_CHANGE] About to execute: Determine change direction (increase/decrease)")
+            change_direction = "increased" if rate_change_amount > 0 else "decreased"
+            print(f"[CHECK_RATE_CHANGE] change_direction={change_direction}")
+
+            print("[CHECK_RATE_CHANGE] About to execute: Build warning message")
+            warning_message = f"Day rate {change_direction} from £{previous_rate_decimal:.2f} to £{new_rate_decimal:.2f} ({rate_change_percent:+.2f}% change, threshold: {alert_threshold}%)"
+            print(f"[CHECK_RATE_CHANGE] warning_message={warning_message}")
+
+            warning_dict = {
+                'warning': {
+                    'warning_type': 'RATE_CHANGE',
+                    'row_number': None,  # Will be set by caller if needed
+                    'warning_message': warning_message,
+                    'auto_resolved': False,
+                    'resolution_notes': f"Previous rate: £{previous_rate_decimal:.2f} (period {previous_period_num}), New rate: £{new_rate_decimal:.2f} (period {current_period_num})"
+                }
+            }
+            print(f"[CHECK_RATE_CHANGE] Returning warning: {warning_dict}")
+            return warning_dict
+
+        print(f"[CHECK_RATE_CHANGE] Rate change {abs_change_percent:.2f}% is within threshold {alert_threshold}% - no warning")
         print("[CHECK_RATE_CHANGE] Returning no warning (warning=None)")
         return {'warning': None}
 

@@ -291,26 +291,67 @@ def match_period(event: dict, logger: StructuredLogger) -> dict:
         print("[FILE_PROCESSOR] About to execute: raise ValueError for missing submission date")
         raise ValueError("Could not determine submission date from filename")
 
-    # Find matching period
-    # For now, use simple logic - in production, match by date range
-    print("[FILE_PROCESSOR] About to execute: period_number = 8")
-    period_number = 8  # TODO: Implement proper period matching
-    print(f"[FILE_PROCESSOR] Result: period_number = {period_number}")
-
-    print(f"[FILE_PROCESSOR] About to execute: dynamodb_client.table.get_item for period {period_number}")
-    response = dynamodb_client.table.get_item(
-        Key={'PK': f'PERIOD#{period_number}', 'SK': 'PROFILE'}
+    # Find matching period by date-based lookup
+    # Query all periods and find the one where submission_date falls within StartDate/EndDate range
+    print("[FILE_PROCESSOR] About to execute: Scan table for all PERIOD entities")
+    response = dynamodb_client.table.scan(
+        FilterExpression='begins_with(PK, :pk_prefix) AND SK = :sk',
+        ExpressionAttributeValues={
+            ':pk_prefix': 'PERIOD#',
+            ':sk': 'PROFILE'
+        }
     )
-    print(f"[FILE_PROCESSOR] Result: get_item response = {response}")
+    print(f"[FILE_PROCESSOR] Result: scan response with {len(response.get('Items', []))} periods found")
 
-    print("[FILE_PROCESSOR] About to execute: check if 'Item' not in response")
-    if 'Item' not in response:
-        print(f"[FILE_PROCESSOR] About to execute: raise ValueError for period {period_number} not found")
-        raise ValueError(f"Period {period_number} not found")
+    print("[FILE_PROCESSOR] About to execute: Parse submission_date to compare with period date ranges")
+    try:
+        print(f"[FILE_PROCESSOR] About to execute: datetime.strptime({submission_date}, '%d%m%Y')")
+        submission_dt = datetime.strptime(submission_date, '%d%m%Y')
+        print(f"[FILE_PROCESSOR] Result: submission_dt = {submission_dt}")
 
-    print("[FILE_PROCESSOR] About to execute: period = response['Item']")
-    period = response['Item']
-    print(f"[FILE_PROCESSOR] Result: period = {period}")
+        print("[FILE_PROCESSOR] About to execute: Format submission_dt to YYYY-MM-DD for comparison")
+        submission_date_formatted = submission_dt.strftime('%Y-%m-%d')
+        print(f"[FILE_PROCESSOR] Result: submission_date_formatted = {submission_date_formatted}")
+    except ValueError as e:
+        print(f"[FILE_PROCESSOR] About to execute: raise ValueError for invalid submission date format: {e}")
+        raise ValueError(f"Invalid submission date format '{submission_date}'. Expected DDMMYYYY format. Error: {e}")
+
+    print("[FILE_PROCESSOR] About to execute: Iterate through periods to find matching period")
+    period = None
+    period_number = None
+
+    print(f"[FILE_PROCESSOR] About to execute: Loop through {len(response.get('Items', []))} periods")
+    for period_item in response.get('Items', []):
+        print(f"[FILE_PROCESSOR] About to execute: Check period {period_item.get('PeriodNumber')}")
+
+        work_start_date = period_item.get('WorkStartDate')
+        print(f"[FILE_PROCESSOR] Result: work_start_date = {work_start_date}")
+
+        work_end_date = period_item.get('WorkEndDate')
+        print(f"[FILE_PROCESSOR] Result: work_end_date = {work_end_date}")
+
+        print(f"[FILE_PROCESSOR] About to execute: Check if {submission_date_formatted} falls between {work_start_date} and {work_end_date}")
+
+        if work_start_date and work_end_date:
+            print(f"[FILE_PROCESSOR] About to execute: Compare dates: {work_start_date} <= {submission_date_formatted} <= {work_end_date}")
+
+            if work_start_date <= submission_date_formatted <= work_end_date:
+                print(f"[FILE_PROCESSOR] Result: Match found! submission_date falls within period {period_item.get('PeriodNumber')}")
+                period = period_item
+                period_number = period_item.get('PeriodNumber')
+                print(f"[FILE_PROCESSOR] Result: period_number = {period_number}, period = {period}")
+                break
+            else:
+                print(f"[FILE_PROCESSOR] Result: No match - submission_date outside range")
+        else:
+            print(f"[FILE_PROCESSOR] Result: Period {period_item.get('PeriodNumber')} missing WorkStartDate or WorkEndDate, skipping")
+
+    print("[FILE_PROCESSOR] About to execute: Check if matching period was found")
+    if not period or period_number is None:
+        print(f"[FILE_PROCESSOR] About to execute: raise ValueError - no period found for submission_date {submission_date_formatted}")
+        raise ValueError(f"No pay period found for submission date {submission_date_formatted}. Please verify the submission date falls within a valid pay period.")
+
+    print(f"[FILE_PROCESSOR] Result: Successfully matched to period {period_number}")
 
     print(f"[FILE_PROCESSOR] About to execute: logger.info 'Period matched' for umbrella_id = {umbrella_id}, period_number = {period_number}")
     logger.info("Period matched", umbrella_id=umbrella_id, period_number=period_number)
