@@ -197,12 +197,8 @@ def extract_metadata(event: dict, logger: StructuredLogger) -> dict:
     print(f"[FILE_PROCESSOR] Result: file downloaded to {temp_file.name}")
 
     # Parse Excel file
-    print("[FILE_PROCESSOR] About to execute: extract original filename from S3 key")
-    original_filename = s3_key.split('/')[-1]
-    print(f"[FILE_PROCESSOR] Result: original_filename = {original_filename}")
-
-    print(f"[FILE_PROCESSOR] About to execute: parser = PayFileParser({temp_file.name}, {original_filename})")
-    parser = PayFileParser(temp_file.name, original_filename)
+    print(f"[FILE_PROCESSOR] About to execute: parser = PayFileParser({temp_file.name})")
+    parser = PayFileParser(temp_file.name)
     print(f"[FILE_PROCESSOR] Result: parser created = {parser}")
 
     print("[FILE_PROCESSOR] About to execute: metadata = parser.extract_metadata()")
