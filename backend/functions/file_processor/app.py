@@ -840,21 +840,28 @@ def mark_error(event: dict, logger: StructuredLogger) -> dict:
     validation_errors = event.get('validation_errors', [])
     print(f"[FILE_PROCESSOR] Result: validation_errors count = {len(validation_errors)}")
 
+    # Extract error message from event for better debugging
+    error_message = event.get('error', {}).get('Error', 'Unknown error')
+    if isinstance(error_message, dict):
+        error_message = error_message.get('Cause', str(error_message))
+    print(f"[FILE_PROCESSOR] Extracted error_message = {error_message}")
+
     print(f"[FILE_PROCESSOR] About to execute: logger.error 'Marking file as ERROR' for file_id = {file_id}, error_count = {len(validation_errors)}")
-    logger.error("Marking file as ERROR", file_id=file_id, error_count=len(validation_errors))
+    logger.error("Marking file as ERROR", file_id=file_id, error_count=len(validation_errors), error_message=error_message)
     print("[FILE_PROCESSOR] Result: logger.error executed successfully")
 
     print(f"[FILE_PROCESSOR] About to execute: datetime.utcnow().isoformat() + 'Z'")
     timestamp = datetime.utcnow().isoformat() + 'Z'
     print(f"[FILE_PROCESSOR] Result: timestamp = {timestamp}")
 
-    print(f"[FILE_PROCESSOR] About to execute: dynamodb_client.update_file_status({file_id}, 'ERROR', ErrorRecords={len(validation_errors)}, ValidRecords=0, TotalRecords=0, ProcessingCompletedAt={timestamp})")
+    print(f"[FILE_PROCESSOR] About to execute: dynamodb_client.update_file_status({file_id}, 'ERROR', ErrorRecords={len(validation_errors)}, ValidRecords=0, TotalRecords=0, ErrorMessage={error_message}, ProcessingCompletedAt={timestamp})")
     dynamodb_client.update_file_status(
         file_id,
         'ERROR',
         ErrorRecords=len(validation_errors),
         ValidRecords=0,
         TotalRecords=0,
+        ErrorMessage=error_message,
         ProcessingCompletedAt=timestamp
     )
     print(f"[FILE_PROCESSOR] Result: file status updated to ERROR")
@@ -883,6 +890,12 @@ def mark_failed(event: dict, logger: StructuredLogger) -> dict:
     error = event.get('error', {})
     print(f"[FILE_PROCESSOR] Result: error = {error}")
 
+    # Extract error message for storage in DynamoDB
+    error_message = str(error) if error else 'Unknown system error'
+    if isinstance(error, dict):
+        error_message = error.get('Error', error.get('Cause', str(error)))
+    print(f"[FILE_PROCESSOR] Extracted error_message = {error_message}")
+
     print(f"[FILE_PROCESSOR] About to execute: logger.error 'Processing failed' for file_id = {file_id}, error = {error}")
     logger.error("Processing failed", file_id=file_id, error=error)
     print("[FILE_PROCESSOR] Result: logger.error executed successfully")
@@ -891,10 +904,11 @@ def mark_failed(event: dict, logger: StructuredLogger) -> dict:
     timestamp = datetime.utcnow().isoformat() + 'Z'
     print(f"[FILE_PROCESSOR] Result: timestamp = {timestamp}")
 
-    print(f"[FILE_PROCESSOR] About to execute: dynamodb_client.update_file_status({file_id}, 'FAILED', ProcessingCompletedAt={timestamp})")
+    print(f"[FILE_PROCESSOR] About to execute: dynamodb_client.update_file_status({file_id}, 'FAILED', ErrorMessage={error_message}, ProcessingCompletedAt={timestamp})")
     dynamodb_client.update_file_status(
         file_id,
         'FAILED',
+        ErrorMessage=error_message,
         ProcessingCompletedAt=timestamp
     )
     print(f"[FILE_PROCESSOR] Result: file status updated to FAILED")
