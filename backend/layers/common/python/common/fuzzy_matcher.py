@@ -17,7 +17,7 @@ print("[FUZZY_MATCHER_MODULE] Imported fuzzywuzzy")
 class FuzzyMatcher:
     """Fuzzy string matching for contractor names"""
 
-    def __init__(self, threshold: int = 85):
+    def __init__(self, threshold: int = 75):
         """
         Initialize fuzzy matcher
 

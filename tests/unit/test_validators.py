@@ -220,29 +220,35 @@ class TestValidationEngine:
 
         assert result['valid'] is False
 
-    def test_rule5_overtime_rate_validation(self, mock_dynamodb_client, sample_pay_record):
+    def test_rule5_overtime_rate_validation(self, mock_dynamodb_client, sample_pay_record, sample_period_data):
         """Rule 5: Overtime rate validation"""
         validator = ValidationEngine(mock_dynamodb_client)
+
+        # Mock the get_contractor_rate_in_period to return normal rate
+        mock_dynamodb_client.get_contractor_rate_in_period = MagicMock(return_value=450.0)
 
         # Valid overtime rate (high day rate)
         record = sample_pay_record.copy()
         record['record_type'] = 'OVERTIME'
         record['day_rate'] = 675.00  # 1.5x of 450
 
-        result = validator.validate_overtime_rate(record)
+        result = validator.validate_overtime_rate(record, 'C001', sample_period_data)
 
         assert result['valid'] is True
 
-    def test_rule5_overtime_rate_too_low_fails(self, mock_dynamodb_client, sample_pay_record):
+    def test_rule5_overtime_rate_too_low_fails(self, mock_dynamodb_client, sample_pay_record, sample_period_data):
         """Rule 5: Suspiciously low overtime rate fails"""
         validator = ValidationEngine(mock_dynamodb_client)
+
+        # Mock the get_contractor_rate_in_period to return normal rate
+        mock_dynamodb_client.get_contractor_rate_in_period = MagicMock(return_value=450.0)
 
         # Overtime rate too low
         record = sample_pay_record.copy()
         record['record_type'] = 'OVERTIME'
         record['day_rate'] = 250.00  # Too low for overtime
 
-        result = validator.validate_overtime_rate(record)
+        result = validator.validate_overtime_rate(record, 'C001', sample_period_data)
 
         assert result['valid'] is False
         assert result['error']['error_type'] == 'INVALID_OVERTIME_RATE'
@@ -288,6 +294,7 @@ class TestValidationEngine:
         mock_dynamodb_client.get_contractor_umbrella_associations = MagicMock(
             return_value=sample_umbrella_associations
         )
+        mock_dynamodb_client.get_contractor_rate_in_period = MagicMock(return_value=450.0)
 
         contractors_cache = {c['ContractorID']: c for c in sample_contractors}
 
@@ -338,6 +345,7 @@ class TestValidationEngine:
         mock_dynamodb_client.get_contractor_umbrella_associations = MagicMock(
             return_value=sample_umbrella_associations
         )
+        mock_dynamodb_client.get_contractor_rate_in_period = MagicMock(return_value=450.0)
 
         contractors_cache = {c['ContractorID']: c for c in sample_contractors}
 

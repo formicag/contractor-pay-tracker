@@ -65,9 +65,9 @@ print("[FILE_UPLOAD_HANDLER] Reading S3_BUCKET_NAME from environment")
 S3_BUCKET = os.environ.get('S3_BUCKET_NAME')
 print(f"[FILE_UPLOAD_HANDLER] S3_BUCKET set to: {S3_BUCKET}")
 
-print("[FILE_UPLOAD_HANDLER] Reading STATE_MACHINE_ARN from environment")
-STATE_MACHINE_ARN = os.environ.get('STATE_MACHINE_ARN', '')
-print(f"[FILE_UPLOAD_HANDLER] STATE_MACHINE_ARN set to: {STATE_MACHINE_ARN}")
+print("[FILE_UPLOAD_HANDLER] Reading STEP_FUNCTION_ARN from environment")
+STEP_FUNCTION_ARN = os.environ.get('STEP_FUNCTION_ARN', '')
+print(f"[FILE_UPLOAD_HANDLER] STEP_FUNCTION_ARN set to: {STEP_FUNCTION_ARN}")
 
 print("[FILE_UPLOAD_HANDLER] ========================================")
 print("[FILE_UPLOAD_HANDLER] Module loading completed")
@@ -313,17 +313,17 @@ def handle_api_upload(event, logger: StructuredLogger):
     print("[FILE_UPLOAD_HANDLER] Metadata creation logged")
 
     # Trigger Step Functions workflow
-    print("[FILE_UPLOAD_HANDLER] Checking if STATE_MACHINE_ARN is set")
-    print(f"[FILE_UPLOAD_HANDLER] STATE_MACHINE_ARN: {STATE_MACHINE_ARN}")
+    print("[FILE_UPLOAD_HANDLER] Checking if STEP_FUNCTION_ARN is set")
+    print(f"[FILE_UPLOAD_HANDLER] STEP_FUNCTION_ARN: {STEP_FUNCTION_ARN}")
 
-    if STATE_MACHINE_ARN:
-        print("[FILE_UPLOAD_HANDLER] STATE_MACHINE_ARN is set, triggering Step Functions")
+    if STEP_FUNCTION_ARN:
+        print("[FILE_UPLOAD_HANDLER] STEP_FUNCTION_ARN is set, triggering Step Functions")
         try:
             print("[FILE_UPLOAD_HANDLER] Building Step Functions execution input")
             sfn_input = {
-                'file_id': file_id,
-                's3_bucket': S3_BUCKET,
-                's3_key': s3_key
+                'fileId': file_id,
+                'bucket': S3_BUCKET,
+                'key': s3_key
             }
             print(f"[FILE_UPLOAD_HANDLER] sfn_input: {sfn_input}")
 
@@ -332,7 +332,7 @@ def handle_api_upload(event, logger: StructuredLogger):
 
             print("[FILE_UPLOAD_HANDLER] Calling sfn_client.start_execution()")
             execution_response = sfn_client.start_execution(
-                stateMachineArn=STATE_MACHINE_ARN,
+                stateMachineArn=STEP_FUNCTION_ARN,
                 name=execution_name,
                 input=json.dumps(sfn_input)
             )
@@ -357,8 +357,8 @@ def handle_api_upload(event, logger: StructuredLogger):
             execution_arn = None
             print(f"[FILE_UPLOAD_HANDLER] execution_arn: {execution_arn}")
     else:
-        print("[FILE_UPLOAD_HANDLER] STATE_MACHINE_ARN not set, skipping workflow trigger")
-        logger.warning("STATE_MACHINE_ARN not set, skipping workflow trigger")
+        print("[FILE_UPLOAD_HANDLER] STEP_FUNCTION_ARN not set, skipping workflow trigger")
+        logger.warning("STEP_FUNCTION_ARN not set, skipping workflow trigger")
         print("[FILE_UPLOAD_HANDLER] Warning logged")
         execution_arn = None
         print(f"[FILE_UPLOAD_HANDLER] execution_arn: {execution_arn}")
@@ -555,15 +555,15 @@ def handle_s3_event(event, logger: StructuredLogger):
             print("[FILE_UPLOAD_HANDLER] Metadata creation logged")
 
             # Trigger Step Functions workflow
-            print("[FILE_UPLOAD_HANDLER] Checking if STATE_MACHINE_ARN is set")
-            if STATE_MACHINE_ARN:
-                print("[FILE_UPLOAD_HANDLER] STATE_MACHINE_ARN is set, triggering workflow")
+            print("[FILE_UPLOAD_HANDLER] Checking if STEP_FUNCTION_ARN is set")
+            if STEP_FUNCTION_ARN:
+                print("[FILE_UPLOAD_HANDLER] STEP_FUNCTION_ARN is set, triggering workflow")
                 try:
                     print("[FILE_UPLOAD_HANDLER] Building Step Functions input")
                     sfn_input = {
-                        'file_id': file_id,
-                        's3_bucket': s3_bucket,
-                        's3_key': s3_key
+                        'fileId': file_id,
+                        'bucket': s3_bucket,
+                        'key': s3_key
                     }
                     print(f"[FILE_UPLOAD_HANDLER] sfn_input: {sfn_input}")
 
@@ -572,7 +572,7 @@ def handle_s3_event(event, logger: StructuredLogger):
 
                     print("[FILE_UPLOAD_HANDLER] Calling sfn_client.start_execution()")
                     execution_response = sfn_client.start_execution(
-                        stateMachineArn=STATE_MACHINE_ARN,
+                        stateMachineArn=STEP_FUNCTION_ARN,
                         name=execution_name,
                         input=json.dumps(sfn_input)
                     )
@@ -617,8 +617,8 @@ def handle_s3_event(event, logger: StructuredLogger):
                     responses.append(response_item)
                     print(f"[FILE_UPLOAD_HANDLER] responses: {responses}")
             else:
-                print("[FILE_UPLOAD_HANDLER] STATE_MACHINE_ARN not set")
-                logger.warning("STATE_MACHINE_ARN not set")
+                print("[FILE_UPLOAD_HANDLER] STEP_FUNCTION_ARN not set")
+                logger.warning("STEP_FUNCTION_ARN not set")
                 print("[FILE_UPLOAD_HANDLER] Warning logged")
 
                 print("[FILE_UPLOAD_HANDLER] Building response without workflow")

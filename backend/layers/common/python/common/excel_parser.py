@@ -42,44 +42,8 @@ class PayFileParser:
         filename = self.file_path.split('/')[-1]
         print(f"[EXTRACT_METADATA] Extracted filename from path: {filename}")
 
-        # Try to extract umbrella company from filename
-        umbrella_patterns = {
-            'NASA': r'NASA',
-            'PAYSTREAM': r'PAYSTREAM',
-            'PARASOL': r'Parasol',
-            'CLARITY': r'Clarity',
-            'GIANT': r'GIANT',
-            'WORKWELL': r'WORKWELL'
-        }
-        print(f"[EXTRACT_METADATA] Umbrella patterns: {umbrella_patterns}")
-
-        umbrella_code = None
-        print(f"[EXTRACT_METADATA] Searching for umbrella company in filename")
-        for code, pattern in umbrella_patterns.items():
-            print(f"[EXTRACT_METADATA] Checking pattern '{pattern}' for code '{code}'")
-            if re.search(pattern, filename, re.IGNORECASE):
-                print(f"[EXTRACT_METADATA] Match found! Setting umbrella_code={code}")
-                umbrella_code = code
-                break
-
-        if umbrella_code is None:
-            print(f"[EXTRACT_METADATA] No umbrella company match found")
-        else:
-            print(f"[EXTRACT_METADATA] Final umbrella_code={umbrella_code}")
-
-        # Try to extract date from filename (DDMMYYYY format)
-        print(f"[EXTRACT_METADATA] Searching for date in filename (DDMMYYYY format)")
-        date_match = re.search(r'(\d{8})', filename)
-        print(f"[EXTRACT_METADATA] Date regex match result: {date_match}")
-
-        submission_date = None
-        if date_match:
-            date_str = date_match.group(1)
-            print(f"[EXTRACT_METADATA] Extracted date string: {date_str}")
-            submission_date = date_str
-            print(f"[EXTRACT_METADATA] Parsed submission_date: {submission_date}")
-        else:
-            print(f"[EXTRACT_METADATA] No date found in filename")
+        umbrella_code = self._extract_umbrella_code()
+        submission_date = self._extract_submission_date()
 
         metadata = {
             'filename': filename,
@@ -130,11 +94,10 @@ class PayFileParser:
         records = []
         print(f"[PARSE_RECORDS] Initialized empty records list")
 
-        row_number = 0
         print(f"[PARSE_RECORDS] Starting row iteration from row {header_row + 1}")
 
         for row_idx, row in enumerate(self.worksheet.iter_rows(min_row=header_row + 1), start=header_row + 1):
-            row_number += 1
+            row_number = row_idx
             print(f"[PARSE_RECORDS] Processing row {row_idx}, row_number={row_number}")
 
             # Skip empty rows
@@ -313,7 +276,7 @@ class PayFileParser:
         # Determine record type
         print(f"[PARSE_ROW] Determining record type from notes")
         record_type = 'NORMAL'
-        if 'overtime' in notes.lower():
+        if self._is_overtime_record(notes):
             print(f"[PARSE_ROW] Found 'overtime' in notes, setting record_type=OVERTIME")
             record_type = 'OVERTIME'
         elif 'expense' in notes.lower():
@@ -379,6 +342,75 @@ class PayFileParser:
             print(f"[PARSE_DECIMAL] Conversion failed: {type(e).__name__}: {str(e)}")
             print(f"[PARSE_DECIMAL] Returning Decimal('0')")
             return Decimal('0')
+
+    def _is_overtime_record(self, notes: str) -> bool:
+        """Check if a record is an overtime record based on notes"""
+        print(f"[IS_OVERTIME_RECORD] Checking if notes contain 'overtime': {notes}")
+        result = 'overtime' in notes.lower()
+        print(f"[IS_OVERTIME_RECORD] Result: {result}")
+        return result
+
+    def _extract_umbrella_code(self) -> Optional[str]:
+        """Extract umbrella company code from filename"""
+        filename = self.file_path.split('/')[-1]
+        print(f"[EXTRACT_UMBRELLA_CODE] Extracted filename: {filename}")
+
+        umbrella_patterns = {
+            'NASA': r'NASA',
+            'PAYSTREAM': r'PAYSTREAM',
+            'PARASOL': r'Parasol',
+            'CLARITY': r'Clarity',
+            'GIANT': r'GIANT',
+            'WORKWELL': r'WORKWELL'
+        }
+        print(f"[EXTRACT_UMBRELLA_CODE] Umbrella patterns: {umbrella_patterns}")
+
+        umbrella_code = None
+        print(f"[EXTRACT_UMBRELLA_CODE] Searching for umbrella company in filename")
+        for code, pattern in umbrella_patterns.items():
+            print(f"[EXTRACT_UMBRELLA_CODE] Checking pattern '{pattern}' for code '{code}'")
+            if re.search(pattern, filename, re.IGNORECASE):
+                print(f"[EXTRACT_UMBRELLA_CODE] Match found! Setting umbrella_code={code}")
+                umbrella_code = code
+                break
+
+        if umbrella_code is None:
+            print(f"[EXTRACT_UMBRELLA_CODE] No umbrella company match found")
+        else:
+            print(f"[EXTRACT_UMBRELLA_CODE] Final umbrella_code={umbrella_code}")
+
+        return umbrella_code
+
+    def _extract_submission_date(self) -> Optional[str]:
+        """Extract submission date from filename (DDMMYYYY format)"""
+        filename = self.file_path.split('/')[-1]
+        print(f"[EXTRACT_SUBMISSION_DATE] Extracted filename: {filename}")
+
+        print(f"[EXTRACT_SUBMISSION_DATE] Searching for date in filename (DDMMYYYY format)")
+        date_match = re.search(r'(\d{8})', filename)
+        print(f"[EXTRACT_SUBMISSION_DATE] Date regex match result: {date_match}")
+
+        submission_date = None
+        if date_match:
+            date_str = date_match.group(1)
+            print(f"[EXTRACT_SUBMISSION_DATE] Extracted date string: {date_str}")
+            submission_date = date_str
+            print(f"[EXTRACT_SUBMISSION_DATE] Parsed submission_date: {submission_date}")
+        else:
+            print(f"[EXTRACT_SUBMISSION_DATE] No date found in filename")
+
+        return submission_date
+
+    def __enter__(self):
+        """Context manager entry"""
+        print(f"[CONTEXT_MANAGER] Entering context manager")
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        """Context manager exit"""
+        print(f"[CONTEXT_MANAGER] Exiting context manager, exc_type={exc_type}")
+        self.close()
+        return False
 
     def close(self):
         """Close the workbook"""

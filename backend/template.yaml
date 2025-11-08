@@ -197,7 +197,8 @@ Resources:
             BucketName: !Ref PayFilesBucket
         - DynamoDBCrudPolicy:
             TableName: !Ref ContractorPayTable
-        - Statement:
+        - Version: '2012-10-17'
+          Statement:
             - Effect: Allow
               Action:
                 - states:StartExecution
@@ -206,9 +207,9 @@ Resources:
         UploadApi:
           Type: Api
           Properties:
-            RestApiId: !Ref ApiGateway
             Path: /api/v1/upload
             Method: POST
+            RestApiId: !Ref ApiGateway
 
   FileProcessorFunction:
     Type: AWS::Serverless::Function
@@ -226,11 +227,6 @@ Resources:
             BucketName: !Ref PayFilesBucket
         - DynamoDBCrudPolicy:
             TableName: !Ref ContractorPayTable
-        - Statement:
-            - Effect: Allow
-              Action:
-                - states:StartExecution
-              Resource: !Ref PayFileProcessingStateMachine
 
   ValidationEngineFunction:
     Type: AWS::Serverless::Function

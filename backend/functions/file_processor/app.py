@@ -161,8 +161,8 @@ def extract_metadata(event: dict, logger: StructuredLogger) -> dict:
     """
     print(f"[FILE_PROCESSOR] About to execute: extract_metadata with event = {event}")
 
-    print("[FILE_PROCESSOR] About to execute: file_id = event['file_id']")
-    file_id = event['file_id']
+    print("[FILE_PROCESSOR] About to execute: file_id = event['fileId']")
+    file_id = event['fileId']
     print(f"[FILE_PROCESSOR] Result: file_id = {file_id}")
 
     print(f"[FILE_PROCESSOR] About to execute: logger.info 'Extracting metadata' for file_id = {file_id}")
@@ -236,8 +236,8 @@ def match_period(event: dict, logger: StructuredLogger) -> dict:
     """
     print(f"[FILE_PROCESSOR] About to execute: match_period with event = {event}")
 
-    print("[FILE_PROCESSOR] About to execute: file_id = event['file_id']")
-    file_id = event['file_id']
+    print("[FILE_PROCESSOR] About to execute: file_id = event['fileId']")
+    file_id = event['fileId']
     print(f"[FILE_PROCESSOR] Result: file_id = {file_id}")
 
     print("[FILE_PROCESSOR] About to execute: metadata = event.get('metadata_result', {})")
@@ -376,8 +376,8 @@ def check_duplicates(event: dict, logger: StructuredLogger) -> dict:
     """
     print(f"[FILE_PROCESSOR] About to execute: check_duplicates with event = {event}")
 
-    print("[FILE_PROCESSOR] About to execute: file_id = event['file_id']")
-    file_id = event['file_id']
+    print("[FILE_PROCESSOR] About to execute: file_id = event['fileId']")
+    file_id = event['fileId']
     print(f"[FILE_PROCESSOR] Result: file_id = {file_id}")
 
     print("[FILE_PROCESSOR] About to execute: umbrella_id = event['umbrella_id']")
@@ -446,8 +446,8 @@ def supersede_existing(event: dict, logger: StructuredLogger) -> dict:
     """
     print(f"[FILE_PROCESSOR] About to execute: supersede_existing with event = {event}")
 
-    print("[FILE_PROCESSOR] About to execute: file_id = event['file_id']")
-    file_id = event['file_id']
+    print("[FILE_PROCESSOR] About to execute: file_id = event['fileId']")
+    file_id = event['fileId']
     print(f"[FILE_PROCESSOR] Result: file_id = {file_id}")
 
     print("[FILE_PROCESSOR] About to execute: existing_file_id = event['existing_file_id']")
@@ -526,8 +526,8 @@ def parse_records(event: dict, logger: StructuredLogger) -> dict:
     """
     print(f"[FILE_PROCESSOR] About to execute: parse_records with event = {event}")
 
-    print("[FILE_PROCESSOR] About to execute: file_id = event['file_id']")
-    file_id = event['file_id']
+    print("[FILE_PROCESSOR] About to execute: file_id = event['fileId']")
+    file_id = event['fileId']
     print(f"[FILE_PROCESSOR] Result: file_id = {file_id}")
 
     print("[FILE_PROCESSOR] About to execute: umbrella_id = event['umbrella_id']")
@@ -619,8 +619,8 @@ def import_records(event: dict, logger: StructuredLogger) -> dict:
     """
     print(f"[FILE_PROCESSOR] About to execute: import_records with event keys = {event.keys()}")
 
-    print("[FILE_PROCESSOR] About to execute: file_id = event['file_id']")
-    file_id = event['file_id']
+    print("[FILE_PROCESSOR] About to execute: file_id = event['fileId']")
+    file_id = event['fileId']
     print(f"[FILE_PROCESSOR] Result: file_id = {file_id}")
 
     print("[FILE_PROCESSOR] About to execute: validated_records = event.get('validated_records', [])")
@@ -723,8 +723,8 @@ def mark_complete(event: dict, logger: StructuredLogger) -> dict:
     """
     print(f"[FILE_PROCESSOR] About to execute: mark_complete with event keys = {event.keys()}")
 
-    print("[FILE_PROCESSOR] About to execute: file_id = event['file_id']")
-    file_id = event['file_id']
+    print("[FILE_PROCESSOR] About to execute: file_id = event['fileId']")
+    file_id = event['fileId']
     print(f"[FILE_PROCESSOR] Result: file_id = {file_id}")
 
     print("[FILE_PROCESSOR] About to execute: import_result = event.get('import_result', {})")
@@ -783,8 +783,8 @@ def mark_error(event: dict, logger: StructuredLogger) -> dict:
     """
     print(f"[FILE_PROCESSOR] About to execute: mark_error with event keys = {event.keys()}")
 
-    print("[FILE_PROCESSOR] About to execute: file_id = event['file_id']")
-    file_id = event['file_id']
+    print("[FILE_PROCESSOR] About to execute: file_id = event['fileId']")
+    file_id = event['fileId']
     print(f"[FILE_PROCESSOR] Result: file_id = {file_id}")
 
     print("[FILE_PROCESSOR] About to execute: validation_errors = event.get('validation_errors', [])")
@@ -826,8 +826,8 @@ def mark_failed(event: dict, logger: StructuredLogger) -> dict:
     """
     print(f"[FILE_PROCESSOR] About to execute: mark_failed with event keys = {event.keys()}")
 
-    print("[FILE_PROCESSOR] About to execute: file_id = event['file_id']")
-    file_id = event['file_id']
+    print("[FILE_PROCESSOR] About to execute: file_id = event['fileId']")
+    file_id = event['fileId']
     print(f"[FILE_PROCESSOR] Result: file_id = {file_id}")
 
     print("[FILE_PROCESSOR] About to execute: error = event.get('error', {})")

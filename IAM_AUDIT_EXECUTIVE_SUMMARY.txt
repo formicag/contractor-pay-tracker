@@ -1,0 +1,217 @@
+================================================================================
+LAMBDA IAM PERMISSIONS AUDIT - EXECUTIVE SUMMARY
+================================================================================
+
+Project: Contractor Pay Tracker
+Date: 2025-11-08
+AWS Account: 016164185850
+Region: eu-west-2
+Environment: development
+
+================================================================================
+CRITICAL FINDINGS
+================================================================================
+
+SEVERITY: 🔴 CRITICAL - System will fail in production
+
+The file-upload-handler Lambda function has a BLOCKING permission gap that
+will cause immediate runtime failures when users attempt to upload files.
+
+FAILURE SCENARIO:
+  1. User uploads Excel file via API
+  2. File successfully stored in S3
+  3. Metadata stored in DynamoDB
+  4. FAILED: Attempt to start Step Functions workflow
+     Error: AccessDeniedException - "states:StartExecution" permission missing
+  5. File appears uploaded but never gets processed
+
+BUSINESS IMPACT: Critical - Blocking feature, users cannot process files
+
+================================================================================
+QUICK FIX
+================================================================================
+
+TIME REQUIRED: 5 minutes
+
+Option A (Recommended - Automated):
+  ./fix-lambda-permissions.sh
+
+Option B (Manual):
+  1. Create /tmp/lambda_policy.json with updated permissions
+  2. Run: aws iam put-role-policy --role-name contractor-pay-lambda-development \
+            --policy-name contractor-pay-lambda-policy \
+            --policy-document file:///tmp/lambda_policy.json
+  3. Verify permissions were applied
+
+Option C (Terraform - Best for production):
+  1. Update /terraform/main.tf with new policy statements
+  2. Run: terraform apply -var=environment=development
+  3. Verify: terraform plan
+
+================================================================================
+ISSUES IDENTIFIED
+================================================================================
+
+ISSUE #1: Missing Step Functions Permission [CRITICAL]
+├─ Affects: file-upload-handler Lambda function
+├─ Missing: states:StartExecution, states:DescribeExecution
+├─ Impact: File processing workflow will NOT start
+├─ Fix: Add Step Functions action to IAM policy
+└─ Status: NOT FIXED (needs immediate attention)
+
+ISSUE #2: Overly Permissive DynamoDB [HIGH - Security]
+├─ Affects: All Lambda functions
+├─ Current: dynamodb:* (includes DeleteTable, DropTable, etc.)
+├─ Impact: Violates principle of least privilege
+├─ Fix: Replace with specific actions: GetItem, PutItem, UpdateItem, Query, Scan, BatchWriteItem
+└─ Status: WORKS but insecure
+
+ISSUE #3: Overly Permissive S3 [HIGH - Security]
+├─ Affects: All Lambda functions
+├─ Current: s3:* (includes DeleteBucket, DeleteBucketPolicy, etc.)
+├─ Impact: Violates principle of least privilege
+├─ Fix: Replace with specific actions: GetObject, PutObject, HeadObject, ListBucket, DeleteObject
+└─ Status: WORKS but insecure
+
+================================================================================
+AFFECTED LAMBDA FUNCTIONS
+================================================================================
+
+1. file-upload-handler-development
+   └─ Status: 🔴 FAILING (missing Step Functions permission)
+   └─ Issue: Cannot start processing workflow
+
+2. file-processor-development
+   └─ Status: ✅ WORKING (invoked by Step Functions)
+
+3. validation-engine-development
+   └─ Status: ✅ WORKING (DynamoDB only)
+
+4. report-generator-development
+   └─ Status: ✅ WORKING (DynamoDB and S3)
+
+5. cleanup-handler-development
+   └─ Status: ✅ WORKING (runs on schedule)
+
+================================================================================
+IAM ROLE SUMMARY
+================================================================================
+
+Shared Role Name: contractor-pay-lambda-development
+Number of Lambdas: 5 (all use same role)
+
+Current Permissions:
+✓ AWSLambdaBasicExecutionRole (AWS Managed)
+  └─ CloudWatch Logs: CreateLogGroup, CreateLogStream, PutLogEvents
+
+✓ contractor-pay-lambda-policy (Inline)
+  ├─ DynamoDB: dynamodb:* (OVERLY BROAD)
+  └─ S3: s3:* (OVERLY BROAD)
+  ├─ Missing: states:StartExecution ❌
+  └─ Missing: states:DescribeExecution ❌
+
+Step Functions Role: contractor-pay-step-functions-development
+✓ Can invoke Lambda functions correctly
+
+================================================================================
+REQUIRED ACTIONS
+================================================================================
+
+IMMEDIATE (Before Any Testing):
+1. ✅ Apply Step Functions permissions to Lambda role
+   └─ Use: fix-lambda-permissions.sh OR manual method
+
+BEFORE PRODUCTION:
+2. ⚠️ Implement least-privilege policies (remove wildcards)
+   └─ See: TERRAFORM_PERMISSION_FIX.md
+
+RECOMMENDED:
+3. 📋 Move to Terraform/SAM for IaC management
+   └─ See: TERRAFORM_PERMISSION_FIX.md
+
+================================================================================
+TESTING VERIFICATION
+================================================================================
+
+After applying fix:
+
+Test 1: File Upload via API
+  curl -X POST https://your-api/api/v1/upload \
+    -H "Content-Type: application/json" \
+    -d '{...file payload...}'
+  Expected: HTTP 200, file_id returned, Step Functions execution ARN returned
+
+Test 2: Verify Step Functions Execution
+  aws stepfunctions list-executions \
+    --state-machine-arn arn:aws:states:eu-west-2:...:contractor-pay-workflow-development \
+    --status-filter RUNNING
+  Expected: See running execution for uploaded file
+
+Test 3: Check Lambda Logs
+  aws logs tail /aws/lambda/contractor-pay-file-upload-handler-development --follow
+  Expected: No AccessDenied errors, Step Functions execution started successfully
+
+================================================================================
+DOCUMENTATION PROVIDED
+================================================================================
+
+1. LAMBDA_PERMISSIONS_AUDIT.md
+   ├─ Full technical analysis (50+ pages)
+   ├─ Detailed issue breakdown with code samples
+   ├─ Security recommendations
+   └─ Production readiness checklist
+
+2. PERMISSION_FIX_SUMMARY.md
+   ├─ Quick reference guide
+   ├─ Step-by-step fix instructions
+   └─ Testing checklist
+
+3. TERRAFORM_PERMISSION_FIX.md
+   ├─ Terraform configuration updates
+   ├─ Deployment instructions
+   └─ Pre/post deployment checks
+
+4. fix-lambda-permissions.sh
+   ├─ Automated fix script
+   ├─ Validates and applies policies
+   └─ Verifies success
+
+5. IAM_AUDIT_EXECUTIVE_SUMMARY.txt
+   └─ This file (executive overview)
+
+================================================================================
+TIMELINE
+================================================================================
+
+NOW: 🔴 CRITICAL PERMISSION GAP
+     File uploads will fail
+
+Apply Fix (5 min): 🟡 REDUCED RISK
+     File uploads will work
+     Least-privilege still needed
+
+Implement Least-Privilege (30 min): ✅ SECURE
+     Best practices implemented
+     Production ready
+
+================================================================================
+BOTTOM LINE
+================================================================================
+
+Your Lambda functions have CRITICAL permission gaps that will cause immediate
+failures when users try to upload files. The file-upload-handler cannot start
+the Step Functions workflow because it lacks "states:StartExecution" permission.
+
+This must be fixed BEFORE any user testing or production deployment.
+
+The automated fix script (fix-lambda-permissions.sh) can resolve this in
+5 minutes. Follow up with least-privilege security improvements before going
+to production.
+
+Estimated time to full production readiness: 1 hour
+
+================================================================================
+
+Next: Read PERMISSION_FIX_SUMMARY.md for step-by-step instructions
+Or: Run ./fix-lambda-permissions.sh for automatic fix
+

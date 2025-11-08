@@ -309,7 +309,7 @@ def seed_contractor_umbrella_associations(table, contractor_map, umbrella_map):
             batch.put_item(Item={
                 'PK': f'CONTRACTOR#{contractor_id}',
                 'SK': f'UMBRELLA#{umbrella_id}',
-                'EntityType': 'Association',
+                'EntityType': 'ContractorUmbrellaAssociation',
                 'AssociationID': association_id,
                 'ContractorID': contractor_id,
                 'UmbrellaID': umbrella_id,
@@ -371,7 +371,7 @@ def verify_seed_data(table):
     # Special check for contractor associations (should be 25: 23 + 2 for Donna Smith)
     response = table.scan(
         FilterExpression='EntityType = :type',
-        ExpressionAttributeValues={':type': 'Association'}
+        ExpressionAttributeValues={':type': 'ContractorUmbrellaAssociation'}
     )
     assoc_count = len(response['Items'])
     status = "✓" if assoc_count == 25 else "✗"
