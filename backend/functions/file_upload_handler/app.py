@@ -322,7 +322,7 @@ def handle_api_upload(event, logger: StructuredLogger):
             print("[FILE_UPLOAD_HANDLER] Building Step Functions execution input")
             sfn_input = {
                 'fileId': file_id,
-                'bucket': S3_BUCKET,
+                's3_bucket': S3_BUCKET,
                 'key': s3_key
             }
             print(f"[FILE_UPLOAD_HANDLER] sfn_input: {sfn_input}")
@@ -562,7 +562,7 @@ def handle_s3_event(event, logger: StructuredLogger):
                     print("[FILE_UPLOAD_HANDLER] Building Step Functions input")
                     sfn_input = {
                         'fileId': file_id,
-                        'bucket': s3_bucket,
+                        's3_bucket': s3_bucket,
                         'key': s3_key
                     }
                     print(f"[FILE_UPLOAD_HANDLER] sfn_input: {sfn_input}")
