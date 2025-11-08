@@ -31,9 +31,9 @@ print("[FILE_UPLOAD_HANDLER] Importing uuid")
 import uuid
 print(f"[FILE_UPLOAD_HANDLER] uuid imported: {uuid}")
 
-print("[FILE_UPLOAD_HANDLER] Importing urllib.parse.unquote")
-from urllib.parse import unquote
-print(f"[FILE_UPLOAD_HANDLER] unquote imported: {unquote}")
+print("[FILE_UPLOAD_HANDLER] Importing urllib.parse.unquote_plus")
+from urllib.parse import unquote_plus
+print(f"[FILE_UPLOAD_HANDLER] unquote_plus imported: {unquote_plus}")
 
 print("[FILE_UPLOAD_HANDLER] Importing datetime from datetime")
 from datetime import datetime
@@ -463,7 +463,7 @@ def handle_s3_event(event, logger: StructuredLogger):
             print(f"[FILE_UPLOAD_HANDLER] s3_key_encoded: {s3_key_encoded}")
 
             print("[FILE_UPLOAD_HANDLER] URL-decoding S3 object key")
-            s3_key = unquote(s3_key_encoded)
+            s3_key = unquote_plus(s3_key_encoded)
             print(f"[FILE_UPLOAD_HANDLER] s3_key (decoded): {s3_key}")
 
             print("[FILE_UPLOAD_HANDLER] Extracting file size")
