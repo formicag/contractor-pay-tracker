@@ -21,11 +21,15 @@ print("[EXCEL_PARSER_MODULE] Imported openpyxl modules")
 class PayFileParser:
     """Parse contractor pay Excel files"""
 
-    def __init__(self, file_path: str):
-        print(f"[PAYFILEPARSER_INIT] Starting PayFileParser initialization with file_path={file_path}")
+    def __init__(self, file_path: str, original_filename: Optional[str] = None):
+        print(f"[PAYFILEPARSER_INIT] Starting PayFileParser initialization with file_path={file_path}, original_filename={original_filename}")
 
         self.file_path = file_path
         print(f"[PAYFILEPARSER_INIT] Set self.file_path={self.file_path}")
+
+        # Store original filename if provided, otherwise extract from file_path
+        self.original_filename = original_filename if original_filename else file_path.split('/')[-1]
+        print(f"[PAYFILEPARSER_INIT] Set self.original_filename={self.original_filename}")
 
         print(f"[PAYFILEPARSER_INIT] Loading workbook from {file_path}")
         self.workbook = openpyxl.load_workbook(file_path, data_only=True)
@@ -39,8 +43,9 @@ class PayFileParser:
         """Extract metadata from filename and file content"""
         print(f"[EXTRACT_METADATA] Starting metadata extraction")
 
-        filename = self.file_path.split('/')[-1]
-        print(f"[EXTRACT_METADATA] Extracted filename from path: {filename}")
+        # Use original_filename for metadata extraction
+        filename = self.original_filename
+        print(f"[EXTRACT_METADATA] Using original filename: {filename}")
 
         umbrella_code = self._extract_umbrella_code()
         submission_date = self._extract_submission_date()
@@ -352,8 +357,8 @@ class PayFileParser:
 
     def _extract_umbrella_code(self) -> Optional[str]:
         """Extract umbrella company code from filename"""
-        filename = self.file_path.split('/')[-1]
-        print(f"[EXTRACT_UMBRELLA_CODE] Extracted filename: {filename}")
+        filename = self.original_filename
+        print(f"[EXTRACT_UMBRELLA_CODE] Using original filename: {filename}")
 
         umbrella_patterns = {
             'NASA': r'NASA',
@@ -383,8 +388,8 @@ class PayFileParser:
 
     def _extract_submission_date(self) -> Optional[str]:
         """Extract submission date from filename (DDMMYYYY format)"""
-        filename = self.file_path.split('/')[-1]
-        print(f"[EXTRACT_SUBMISSION_DATE] Extracted filename: {filename}")
+        filename = self.original_filename
+        print(f"[EXTRACT_SUBMISSION_DATE] Using original filename: {filename}")
 
         print(f"[EXTRACT_SUBMISSION_DATE] Searching for date in filename (DDMMYYYY format)")
         date_match = re.search(r'(\d{8})', filename)
