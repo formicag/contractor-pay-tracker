@@ -3,9 +3,13 @@ Validation rules engine for contractor pay records
 Implements all business rules from Gemini improvements
 """
 
+print("[VALIDATORS_MODULE] Starting validators.py module load")
+
 from datetime import datetime
 from decimal import Decimal
 from typing import Dict, List, Optional, Tuple
+
+print("[VALIDATORS_MODULE] Imported datetime, Decimal, and typing modules")
 
 
 class ValidationEngine:
@@ -19,15 +23,27 @@ class ValidationEngine:
             dynamodb_client: DynamoDB client instance
             system_params: System parameters (VAT rate, thresholds, etc.)
         """
+        print("[VALIDATION_ENGINE_INIT] Starting ValidationEngine initialization")
+
         self.db = dynamodb_client
+        print(f"[VALIDATION_ENGINE_INIT] Assigned dynamodb_client to self.db: {self.db}")
+
         self.params = system_params or {}
+        print(f"[VALIDATION_ENGINE_INIT] Assigned system_params to self.params: {self.params}")
 
         # Load system parameters if not provided
         if not self.params:
+            print("[VALIDATION_ENGINE_INIT] system_params is empty, calling _load_system_parameters()")
             self._load_system_parameters()
+        else:
+            print("[VALIDATION_ENGINE_INIT] system_params is populated, skipping _load_system_parameters()")
+
+        print("[VALIDATION_ENGINE_INIT] ValidationEngine initialization complete")
 
     def _load_system_parameters(self):
         """Load system parameters from DynamoDB"""
+        print("[LOAD_SYSTEM_PARAMETERS] Starting _load_system_parameters()")
+
         params = [
             'VAT_RATE',
             'OVERTIME_MULTIPLIER',
@@ -35,17 +51,35 @@ class ValidationEngine:
             'RATE_CHANGE_ALERT_PERCENT',
             'NAME_MATCH_THRESHOLD'
         ]
+        print(f"[LOAD_SYSTEM_PARAMETERS] Created params list: {params}")
 
+        print(f"[LOAD_SYSTEM_PARAMETERS] Iterating through {len(params)} parameters")
         for param in params:
+            print(f"[LOAD_SYSTEM_PARAMETERS] Processing parameter: {param}")
+
             value = self.db.get_system_parameter(param)
+            print(f"[LOAD_SYSTEM_PARAMETERS] Retrieved value for {param}: {value}")
+
             if value:
+                print(f"[LOAD_SYSTEM_PARAMETERS] Value is truthy, converting to appropriate type")
+
                 # Convert to appropriate type
                 if param.endswith('_PERCENT'):
+                    print(f"[LOAD_SYSTEM_PARAMETERS] Parameter ends with _PERCENT, converting to float")
                     self.params[param] = float(value)
+                    print(f"[LOAD_SYSTEM_PARAMETERS] {param} = {self.params[param]}")
                 elif param == 'NAME_MATCH_THRESHOLD':
+                    print(f"[LOAD_SYSTEM_PARAMETERS] Parameter is NAME_MATCH_THRESHOLD, converting to int")
                     self.params[param] = int(value)
+                    print(f"[LOAD_SYSTEM_PARAMETERS] {param} = {self.params[param]}")
                 else:
+                    print(f"[LOAD_SYSTEM_PARAMETERS] Default conversion to float")
                     self.params[param] = float(value)
+                    print(f"[LOAD_SYSTEM_PARAMETERS] {param} = {self.params[param]}")
+            else:
+                print(f"[LOAD_SYSTEM_PARAMETERS] Value is falsy, skipping {param}")
+
+        print(f"[LOAD_SYSTEM_PARAMETERS] _load_system_parameters() complete. Final params: {self.params}")
 
     def validate_record(
         self,
@@ -69,67 +103,148 @@ class ValidationEngine:
             - errors: List of error dicts (CRITICAL - blocks import)
             - warnings: List of warning dicts (NON-BLOCKING)
         """
+        print(f"[VALIDATE_RECORD] Called with record={record}, umbrella_id={umbrella_id}, period_data={period_data}")
+
         errors = []
+        print("[VALIDATE_RECORD] Initialized errors list: []")
+
         warnings = []
+        print("[VALIDATE_RECORD] Initialized warnings list: []")
 
         # Rule 1: Check if permanent staff (CRITICAL)
+        print("[VALIDATE_RECORD] Rule 1: Calling check_permanent_staff()")
         perm_result = self.check_permanent_staff(record)
+        print(f"[VALIDATE_RECORD] check_permanent_staff returned: {perm_result}")
+
         if not perm_result['valid']:
+            print("[VALIDATE_RECORD] Permanent staff check failed (valid=False)")
             errors.append(perm_result['error'])
+            print(f"[VALIDATE_RECORD] Added error to errors list. Errors count: {len(errors)}")
+            print("[VALIDATE_RECORD] Returning early due to permanent staff error")
             return False, errors, warnings  # Stop validation immediately
+        else:
+            print("[VALIDATE_RECORD] Permanent staff check passed (valid=True)")
 
         # Rule 2: Find and validate contractor
+        print("[VALIDATE_RECORD] Rule 2: Calling find_contractor()")
         contractor_result = self.find_contractor(record, contractors_cache)
+        print(f"[VALIDATE_RECORD] find_contractor returned: {contractor_result}")
+
         if not contractor_result['valid']:
-            if contractor_result['severity'] == 'CRITICAL':
+            print("[VALIDATE_RECORD] Contractor lookup failed (valid=False)")
+            severity = contractor_result.get('severity')
+            print(f"[VALIDATE_RECORD] Contractor error severity: {severity}")
+
+            if severity == 'CRITICAL':
+                print("[VALIDATE_RECORD] Severity is CRITICAL, returning early")
                 errors.append(contractor_result['error'])
+                print(f"[VALIDATE_RECORD] Added error to errors list. Errors count: {len(errors)}")
                 return False, errors, warnings
             else:
+                print("[VALIDATE_RECORD] Severity is not CRITICAL, adding to warnings")
                 warnings.append(contractor_result['warning'])
+                print(f"[VALIDATE_RECORD] Added warning to warnings list. Warnings count: {len(warnings)}")
+        else:
+            print("[VALIDATE_RECORD] Contractor lookup passed (valid=True)")
 
         contractor_id = contractor_result.get('contractor_id')
+        print(f"[VALIDATE_RECORD] Extracted contractor_id: {contractor_id}")
+
         contractor_data = contractor_result.get('contractor')
+        print(f"[VALIDATE_RECORD] Extracted contractor_data: {contractor_data}")
 
         # Rule 3: Validate contractor-umbrella association (CRITICAL)
+        print("[VALIDATE_RECORD] Rule 3: Calling validate_umbrella_association()")
         assoc_result = self.validate_umbrella_association(
             contractor_id,
             umbrella_id,
             period_data
         )
+        print(f"[VALIDATE_RECORD] validate_umbrella_association returned: {assoc_result}")
+
         if not assoc_result['valid']:
+            print("[VALIDATE_RECORD] Umbrella association validation failed (valid=False)")
             errors.append(assoc_result['error'])
+            print(f"[VALIDATE_RECORD] Added error to errors list. Errors count: {len(errors)}")
+            print("[VALIDATE_RECORD] Returning early due to umbrella association error")
             return False, errors, warnings
+        else:
+            print("[VALIDATE_RECORD] Umbrella association validation passed (valid=True)")
 
         # Rule 4: Validate VAT calculation (CRITICAL)
+        print("[VALIDATE_RECORD] Rule 4: Calling validate_vat()")
         vat_result = self.validate_vat(record)
+        print(f"[VALIDATE_RECORD] validate_vat returned: {vat_result}")
+
         if not vat_result['valid']:
+            print("[VALIDATE_RECORD] VAT validation failed (valid=False)")
             errors.append(vat_result['error'])
-            # Don't return yet - collect all errors
+            print(f"[VALIDATE_RECORD] Added error to errors list. Errors count: {len(errors)}")
+            print("[VALIDATE_RECORD] Not returning - collecting all errors")
+        else:
+            print("[VALIDATE_RECORD] VAT validation passed (valid=True)")
 
         # Rule 5: Validate overtime rate if applicable (CRITICAL)
-        if record['record_type'] == 'OVERTIME':
+        print(f"[VALIDATE_RECORD] Rule 5: Checking if record_type is OVERTIME")
+        record_type = record.get('record_type')
+        print(f"[VALIDATE_RECORD] record_type: {record_type}")
+
+        if record_type == 'OVERTIME':
+            print("[VALIDATE_RECORD] record_type is OVERTIME, calling validate_overtime_rate()")
             overtime_result = self.validate_overtime_rate(record)
+            print(f"[VALIDATE_RECORD] validate_overtime_rate returned: {overtime_result}")
+
             if not overtime_result['valid']:
+                print("[VALIDATE_RECORD] Overtime validation failed (valid=False)")
                 errors.append(overtime_result['error'])
+                print(f"[VALIDATE_RECORD] Added error to errors list. Errors count: {len(errors)}")
+            else:
+                print("[VALIDATE_RECORD] Overtime validation passed (valid=True)")
+        else:
+            print("[VALIDATE_RECORD] record_type is not OVERTIME, skipping overtime validation")
 
         # Rule 6: Check rate changes (WARNING)
+        print("[VALIDATE_RECORD] Rule 6: Checking for rate changes")
+        print(f"[VALIDATE_RECORD] contractor_id is truthy: {bool(contractor_id)}")
+
         if contractor_id:
+            print("[VALIDATE_RECORD] contractor_id is set, calling check_rate_change()")
+            day_rate = record.get('day_rate')
+            print(f"[VALIDATE_RECORD] day_rate: {day_rate}")
+
             rate_change_result = self.check_rate_change(
                 contractor_id,
-                record['day_rate'],
+                day_rate,
                 period_data
             )
+            print(f"[VALIDATE_RECORD] check_rate_change returned: {rate_change_result}")
+
             if rate_change_result['warning']:
+                print("[VALIDATE_RECORD] Rate change warning present")
                 warnings.append(rate_change_result['warning'])
+                print(f"[VALIDATE_RECORD] Added warning to warnings list. Warnings count: {len(warnings)}")
+            else:
+                print("[VALIDATE_RECORD] No rate change warning")
+        else:
+            print("[VALIDATE_RECORD] contractor_id is not set, skipping rate change check")
 
         # Rule 7: Validate hours (WARNING)
+        print("[VALIDATE_RECORD] Rule 7: Calling validate_hours()")
         hours_result = self.validate_hours(record)
+        print(f"[VALIDATE_RECORD] validate_hours returned: {hours_result}")
+
         if hours_result['warning']:
+            print("[VALIDATE_RECORD] Hours warning present")
             warnings.append(hours_result['warning'])
+            print(f"[VALIDATE_RECORD] Added warning to warnings list. Warnings count: {len(warnings)}")
+        else:
+            print("[VALIDATE_RECORD] No hours warning")
 
         # Record is invalid if any CRITICAL errors found
         is_valid = len(errors) == 0
+        print(f"[VALIDATE_RECORD] Calculated is_valid (len(errors) == 0): {is_valid}")
 
+        print(f"[VALIDATE_RECORD] Final result: is_valid={is_valid}, errors_count={len(errors)}, warnings_count={len(warnings)}")
         return is_valid, errors, warnings
 
     def check_permanent_staff(self, record: Dict) -> Dict:
@@ -137,13 +252,24 @@ class ValidationEngine:
         Rule 1: Check if person is permanent staff
         CRITICAL error if found - Gemini improvement #2
         """
-        first_name = record['forename']
-        last_name = record['surname']
+        print("[CHECK_PERMANENT_STAFF] Starting check_permanent_staff()")
 
+        first_name = record['forename']
+        print(f"[CHECK_PERMANENT_STAFF] Extracted first_name: {first_name}")
+
+        last_name = record['surname']
+        print(f"[CHECK_PERMANENT_STAFF] Extracted last_name: {last_name}")
+
+        print(f"[CHECK_PERMANENT_STAFF] Calling db.check_permanent_staff({first_name}, {last_name})")
         is_permanent = self.db.check_permanent_staff(first_name, last_name)
+        print(f"[CHECK_PERMANENT_STAFF] check_permanent_staff returned: {is_permanent}")
 
         if is_permanent:
-            return {
+            print("[CHECK_PERMANENT_STAFF] Person is permanent staff - generating error response")
+            full_name = f"{first_name} {last_name}"
+            print(f"[CHECK_PERMANENT_STAFF] Full name: {full_name}")
+
+            error_dict = {
                 'valid': False,
                 'severity': 'CRITICAL',
                 'error': {
@@ -151,12 +277,15 @@ class ValidationEngine:
                     'severity': 'CRITICAL',
                     'row_number': record.get('row_number'),
                     'employee_id': record.get('employee_id'),
-                    'contractor_name': f"{first_name} {last_name}",
-                    'error_message': f"CRITICAL: {first_name} {last_name} is permanent staff and must NOT appear in contractor pay files",
-                    'suggested_fix': f"Remove {first_name} {last_name} from this file - they should be paid via payroll, not umbrella company"
+                    'contractor_name': full_name,
+                    'error_message': f"CRITICAL: {full_name} is permanent staff and must NOT appear in contractor pay files",
+                    'suggested_fix': f"Remove {full_name} from this file - they should be paid via payroll, not umbrella company"
                 }
             }
+            print(f"[CHECK_PERMANENT_STAFF] Returning error dict: {error_dict}")
+            return error_dict
 
+        print("[CHECK_PERMANENT_STAFF] Person is not permanent staff - returning valid=True")
         return {'valid': True}
 
     def find_contractor(self, record: Dict, contractors_cache: Dict = None) -> Dict:
@@ -165,23 +294,46 @@ class ValidationEngine:
         CRITICAL if not found after fuzzy match
         WARNING if fuzzy matched (confidence < 100%)
         """
+        print("[FIND_CONTRACTOR] Starting find_contractor()")
+
+        print("[FIND_CONTRACTOR] Importing FuzzyMatcher from fuzzy_matcher module")
         from .fuzzy_matcher import FuzzyMatcher
+        print("[FIND_CONTRACTOR] FuzzyMatcher imported successfully")
 
         first_name = record['forename']
+        print(f"[FIND_CONTRACTOR] Extracted first_name: {first_name}")
+
         last_name = record['surname']
+        print(f"[FIND_CONTRACTOR] Extracted last_name: {last_name}")
 
         # Get contractors from cache or database
+        print(f"[FIND_CONTRACTOR] contractors_cache is provided: {contractors_cache is not None}")
+
         if contractors_cache:
+            print("[FIND_CONTRACTOR] Using contractors_cache")
             contractors = list(contractors_cache.values())
+            print(f"[FIND_CONTRACTOR] Extracted {len(contractors)} contractors from cache")
         else:
+            print("[FIND_CONTRACTOR] Cache not provided, calling db.get_contractor_by_name()")
             contractors = self.db.get_contractor_by_name(first_name, last_name)
+            print(f"[FIND_CONTRACTOR] Retrieved {len(contractors)} contractors from database")
 
         # Fuzzy match
-        matcher = FuzzyMatcher(threshold=int(self.params.get('NAME_MATCH_THRESHOLD', 85)))
+        threshold = int(self.params.get('NAME_MATCH_THRESHOLD', 85))
+        print(f"[FIND_CONTRACTOR] NAME_MATCH_THRESHOLD: {threshold}")
+
+        print("[FIND_CONTRACTOR] Creating FuzzyMatcher instance")
+        matcher = FuzzyMatcher(threshold=threshold)
+        print("[FIND_CONTRACTOR] FuzzyMatcher instance created")
+
+        print(f"[FIND_CONTRACTOR] Calling matcher.match_contractor_name({first_name}, {last_name}, ...)")
         match_result = matcher.match_contractor_name(first_name, last_name, contractors)
+        print(f"[FIND_CONTRACTOR] match_contractor_name returned: {match_result}")
 
         if not match_result:
-            return {
+            print("[FIND_CONTRACTOR] No match found - returning CRITICAL error")
+            full_name = f"{first_name} {last_name}"
+            error_dict = {
                 'valid': False,
                 'severity': 'CRITICAL',
                 'error': {
@@ -189,18 +341,33 @@ class ValidationEngine:
                     'severity': 'CRITICAL',
                     'row_number': record.get('row_number'),
                     'employee_id': record.get('employee_id'),
-                    'contractor_name': f"{first_name} {last_name}",
-                    'error_message': f"CRITICAL: Contractor '{first_name} {last_name}' not found in golden reference data (after fuzzy matching)",
+                    'contractor_name': full_name,
+                    'error_message': f"CRITICAL: Contractor '{full_name}' not found in golden reference data (after fuzzy matching)",
                     'suggested_fix': "Add this contractor to the system or check for spelling errors"
                 }
             }
+            print(f"[FIND_CONTRACTOR] Returning: {error_dict}")
+            return error_dict
 
+        print("[FIND_CONTRACTOR] Match found")
         contractor = match_result['contractor']
+        print(f"[FIND_CONTRACTOR] Extracted contractor: {contractor}")
+
         contractor_id = contractor.get('ContractorID')
+        print(f"[FIND_CONTRACTOR] Extracted contractor_id: {contractor_id}")
 
         # If fuzzy matched, add warning
-        if match_result['match_type'] == 'FUZZY':
-            return {
+        match_type = match_result.get('match_type')
+        print(f"[FIND_CONTRACTOR] match_type: {match_type}")
+
+        if match_type == 'FUZZY':
+            print("[FIND_CONTRACTOR] Match type is FUZZY - returning with warning")
+            confidence = match_result.get('confidence')
+            contractor_full_name = f"{contractor['FirstName']} {contractor['LastName']}"
+            searched_name = match_result.get('searched_name')
+            matched_name = match_result.get('matched_name')
+
+            fuzzy_result = {
                 'valid': True,
                 'severity': 'WARNING',
                 'contractor_id': contractor_id,
@@ -208,18 +375,23 @@ class ValidationEngine:
                 'warning': {
                     'warning_type': 'FUZZY_NAME_MATCH',
                     'row_number': record.get('row_number'),
-                    'warning_message': f"Name '{first_name} {last_name}' matched to '{contractor['FirstName']} {contractor['LastName']}' with {match_result['confidence']}% confidence",
+                    'warning_message': f"Name '{first_name} {last_name}' matched to '{contractor_full_name}' with {confidence}% confidence",
                     'auto_resolved': True,
-                    'resolution_notes': f"Fuzzy matched: {match_result['searched_name']} → {match_result['matched_name']}"
+                    'resolution_notes': f"Fuzzy matched: {searched_name} → {matched_name}"
                 }
             }
+            print(f"[FIND_CONTRACTOR] Returning fuzzy match result: {fuzzy_result}")
+            return fuzzy_result
 
         # Exact match - all good
-        return {
+        print("[FIND_CONTRACTOR] Match type is EXACT - returning valid result")
+        exact_result = {
             'valid': True,
             'contractor_id': contractor_id,
             'contractor': contractor
         }
+        print(f"[FIND_CONTRACTOR] Returning exact match result: {exact_result}")
+        return exact_result
 
     def validate_umbrella_association(
         self,
@@ -235,36 +407,63 @@ class ValidationEngine:
         - Contractor has association with this umbrella
         - Association is valid for this period (ValidFrom/ValidTo dates)
         """
+        print("[VALIDATE_UMBRELLA_ASSOCIATION] Starting validate_umbrella_association()")
+        print(f"[VALIDATE_UMBRELLA_ASSOCIATION] contractor_id={contractor_id}, umbrella_id={umbrella_id}")
+
         if not contractor_id:
+            print("[VALIDATE_UMBRELLA_ASSOCIATION] contractor_id is empty - returning error")
             return {'valid': False, 'error': {'error_type': 'NO_CONTRACTOR_ID'}}
 
         # Get all associations for contractor
+        print(f"[VALIDATE_UMBRELLA_ASSOCIATION] Calling db.get_contractor_umbrella_associations({contractor_id})")
         associations = self.db.get_contractor_umbrella_associations(contractor_id)
+        print(f"[VALIDATE_UMBRELLA_ASSOCIATION] Retrieved {len(associations)} associations")
 
         period_start = period_data.get('WorkStartDate')
+        print(f"[VALIDATE_UMBRELLA_ASSOCIATION] period_start: {period_start}")
+
         period_end = period_data.get('WorkEndDate')
+        print(f"[VALIDATE_UMBRELLA_ASSOCIATION] period_end: {period_end}")
 
         # Find matching umbrella association
         valid_association = None
-        for assoc in associations:
-            if assoc['UmbrellaID'] != umbrella_id:
+        print(f"[VALIDATE_UMBRELLA_ASSOCIATION] Iterating through {len(associations)} associations to find match")
+
+        for idx, assoc in enumerate(associations):
+            print(f"[VALIDATE_UMBRELLA_ASSOCIATION] Processing association {idx+1}/{len(associations)}: {assoc}")
+
+            assoc_umbrella_id = assoc.get('UmbrellaID')
+            print(f"[VALIDATE_UMBRELLA_ASSOCIATION] Association UmbrellaID: {assoc_umbrella_id}")
+
+            if assoc_umbrella_id != umbrella_id:
+                print(f"[VALIDATE_UMBRELLA_ASSOCIATION] UmbrellaID mismatch ({assoc_umbrella_id} != {umbrella_id}), skipping")
                 continue
+
+            print("[VALIDATE_UMBRELLA_ASSOCIATION] UmbrellaID matches, checking date validity")
 
             # Check date validity
             valid_from = assoc.get('ValidFrom')
+            print(f"[VALIDATE_UMBRELLA_ASSOCIATION] valid_from: {valid_from}")
+
             valid_to = assoc.get('ValidTo')
+            print(f"[VALIDATE_UMBRELLA_ASSOCIATION] valid_to: {valid_to}")
 
             if valid_from and valid_from > period_start:
+                print(f"[VALIDATE_UMBRELLA_ASSOCIATION] valid_from ({valid_from}) > period_start ({period_start}) - not valid yet, skipping")
                 continue  # Not valid yet
 
             if valid_to and valid_to < period_end:
+                print(f"[VALIDATE_UMBRELLA_ASSOCIATION] valid_to ({valid_to}) < period_end ({period_end}) - expired, skipping")
                 continue  # Expired
 
+            print("[VALIDATE_UMBRELLA_ASSOCIATION] Association is valid for period")
             valid_association = assoc
+            print(f"[VALIDATE_UMBRELLA_ASSOCIATION] Set valid_association: {valid_association}")
             break
 
         if not valid_association:
-            return {
+            print("[VALIDATE_UMBRELLA_ASSOCIATION] No valid association found - returning error")
+            error_dict = {
                 'valid': False,
                 'error': {
                     'error_type': 'NO_UMBRELLA_ASSOCIATION',
@@ -275,28 +474,55 @@ class ValidationEngine:
                     'suggested_fix': "Verify contractor is assigned to correct umbrella or update contractor-umbrella associations"
                 }
             }
+            print(f"[VALIDATE_UMBRELLA_ASSOCIATION] Returning: {error_dict}")
+            return error_dict
 
-        return {
+        print("[VALIDATE_UMBRELLA_ASSOCIATION] Valid association found - returning success")
+        result = {
             'valid': True,
             'association': valid_association
         }
+        print(f"[VALIDATE_UMBRELLA_ASSOCIATION] Returning: {result}")
+        return result
 
     def validate_vat(self, record: Dict) -> Dict:
         """
         Rule 4: Validate VAT is exactly 20%
         CRITICAL error if incorrect
         """
-        amount = Decimal(str(record['amount']))
-        vat_amount = Decimal(str(record['vat_amount']))
+        print("[VALIDATE_VAT] Starting validate_vat()")
 
-        vat_rate = Decimal(str(self.params.get('VAT_RATE', 0.20)))
+        amount_str = record['amount']
+        print(f"[VALIDATE_VAT] Retrieved amount string: {amount_str}")
+
+        amount = Decimal(str(amount_str))
+        print(f"[VALIDATE_VAT] Converted amount to Decimal: {amount}")
+
+        vat_amount_str = record['vat_amount']
+        print(f"[VALIDATE_VAT] Retrieved vat_amount string: {vat_amount_str}")
+
+        vat_amount = Decimal(str(vat_amount_str))
+        print(f"[VALIDATE_VAT] Converted vat_amount to Decimal: {vat_amount}")
+
+        vat_rate_value = self.params.get('VAT_RATE', 0.20)
+        print(f"[VALIDATE_VAT] Retrieved VAT_RATE from params: {vat_rate_value}")
+
+        vat_rate = Decimal(str(vat_rate_value))
+        print(f"[VALIDATE_VAT] Converted vat_rate to Decimal: {vat_rate}")
+
         expected_vat = amount * vat_rate
+        print(f"[VALIDATE_VAT] Calculated expected_vat: {amount} * {vat_rate} = {expected_vat}")
 
         # Allow 1p tolerance for rounding
         tolerance = Decimal('0.01')
+        print(f"[VALIDATE_VAT] Set tolerance to: {tolerance}")
 
-        if abs(vat_amount - expected_vat) > tolerance:
-            return {
+        difference = abs(vat_amount - expected_vat)
+        print(f"[VALIDATE_VAT] Calculated difference: abs({vat_amount} - {expected_vat}) = {difference}")
+
+        if difference > tolerance:
+            print(f"[VALIDATE_VAT] Difference ({difference}) exceeds tolerance ({tolerance}) - returning error")
+            error_dict = {
                 'valid': False,
                 'error': {
                     'error_type': 'INVALID_VAT',
@@ -307,7 +533,10 @@ class ValidationEngine:
                     'suggested_fix': f"Correct VAT should be £{expected_vat:.2f}"
                 }
             }
+            print(f"[VALIDATE_VAT] Returning error: {error_dict}")
+            return error_dict
 
+        print("[VALIDATE_VAT] VAT validation passed - returning valid=True")
         return {'valid': True}
 
     def validate_overtime_rate(self, record: Dict) -> Dict:
@@ -315,18 +544,38 @@ class ValidationEngine:
         Rule 5: Validate overtime rate is 1.5x normal rate
         CRITICAL error if incorrect (with tolerance)
         """
+        print("[VALIDATE_OVERTIME_RATE] Starting validate_overtime_rate()")
+
         # For overtime records, we need to find the normal rate
         # This is complex - for now, validate rate is reasonable
         # TODO: Implement proper overtime validation with rate history
 
-        day_rate = Decimal(str(record['day_rate']))
-        multiplier = Decimal(str(self.params.get('OVERTIME_MULTIPLIER', 1.5)))
-        tolerance_percent = Decimal(str(self.params.get('OVERTIME_TOLERANCE_PERCENT', 2.0)))
+        day_rate_str = record['day_rate']
+        print(f"[VALIDATE_OVERTIME_RATE] Retrieved day_rate string: {day_rate_str}")
+
+        day_rate = Decimal(str(day_rate_str))
+        print(f"[VALIDATE_OVERTIME_RATE] Converted day_rate to Decimal: {day_rate}")
+
+        multiplier_value = self.params.get('OVERTIME_MULTIPLIER', 1.5)
+        print(f"[VALIDATE_OVERTIME_RATE] Retrieved OVERTIME_MULTIPLIER from params: {multiplier_value}")
+
+        multiplier = Decimal(str(multiplier_value))
+        print(f"[VALIDATE_OVERTIME_RATE] Converted multiplier to Decimal: {multiplier}")
+
+        tolerance_percent_value = self.params.get('OVERTIME_TOLERANCE_PERCENT', 2.0)
+        print(f"[VALIDATE_OVERTIME_RATE] Retrieved OVERTIME_TOLERANCE_PERCENT from params: {tolerance_percent_value}")
+
+        tolerance_percent = Decimal(str(tolerance_percent_value))
+        print(f"[VALIDATE_OVERTIME_RATE] Converted tolerance_percent to Decimal: {tolerance_percent}")
 
         # For now, just check rate is higher than typical
         # Full implementation would compare to contractor's normal rate
-        if day_rate < Decimal('300'):  # Suspiciously low for overtime
-            return {
+        min_overtime_rate = Decimal('300')
+        print(f"[VALIDATE_OVERTIME_RATE] Minimum overtime rate threshold: {min_overtime_rate}")
+
+        if day_rate < min_overtime_rate:
+            print(f"[VALIDATE_OVERTIME_RATE] day_rate ({day_rate}) < minimum ({min_overtime_rate}) - returning error")
+            error_dict = {
                 'valid': False,
                 'error': {
                     'error_type': 'INVALID_OVERTIME_RATE',
@@ -336,7 +585,10 @@ class ValidationEngine:
                     'suggested_fix': "Verify overtime rate is calculated correctly"
                 }
             }
+            print(f"[VALIDATE_OVERTIME_RATE] Returning error: {error_dict}")
+            return error_dict
 
+        print("[VALIDATE_OVERTIME_RATE] Overtime rate validation passed - returning valid=True")
         return {'valid': True}
 
     def check_rate_change(
@@ -349,8 +601,13 @@ class ValidationEngine:
         Rule 6: Check for significant rate changes
         WARNING if rate changed > 5% from previous period
         """
+        print("[CHECK_RATE_CHANGE] Starting check_rate_change()")
+        print(f"[CHECK_RATE_CHANGE] contractor_id={contractor_id}, new_rate={new_rate}")
+
         # TODO: Implement rate history lookup
         # For now, return no warning
+        print("[CHECK_RATE_CHANGE] Rate history lookup not yet implemented")
+        print("[CHECK_RATE_CHANGE] Returning no warning (warning=None)")
         return {'warning': None}
 
     def validate_hours(self, record: Dict) -> Dict:
@@ -358,12 +615,21 @@ class ValidationEngine:
         Rule 7: Validate hours are reasonable
         WARNING if unusual hours detected
         """
+        print("[VALIDATE_HOURS] Starting validate_hours()")
+
         unit_days = record['unit_days']
+        print(f"[VALIDATE_HOURS] Retrieved unit_days: {unit_days}")
+
         total_hours = record.get('total_hours', 0)
+        print(f"[VALIDATE_HOURS] Retrieved total_hours: {total_hours}")
 
         # Check for unusual values
-        if unit_days > 25:  # More than 25 days in 4-week period
-            return {
+        max_days_threshold = 25
+        print(f"[VALIDATE_HOURS] Maximum days threshold: {max_days_threshold}")
+
+        if unit_days > max_days_threshold:
+            print(f"[VALIDATE_HOURS] unit_days ({unit_days}) > maximum ({max_days_threshold}) - returning warning")
+            warning_dict = {
                 'warning': {
                     'warning_type': 'UNUSUAL_HOURS',
                     'row_number': record.get('row_number'),
@@ -371,9 +637,12 @@ class ValidationEngine:
                     'auto_resolved': False
                 }
             }
+            print(f"[VALIDATE_HOURS] Returning warning: {warning_dict}")
+            return warning_dict
 
         if unit_days < 0:
-            return {
+            print(f"[VALIDATE_HOURS] unit_days ({unit_days}) is negative - returning warning")
+            warning_dict = {
                 'warning': {
                     'warning_type': 'UNUSUAL_HOURS',
                     'row_number': record.get('row_number'),
@@ -381,5 +650,10 @@ class ValidationEngine:
                     'auto_resolved': False
                 }
             }
+            print(f"[VALIDATE_HOURS] Returning warning: {warning_dict}")
+            return warning_dict
 
+        print("[VALIDATE_HOURS] Hours validation passed - returning no warning (warning=None)")
         return {'warning': None}
+
+print("[VALIDATORS_MODULE] validators.py module load complete")
