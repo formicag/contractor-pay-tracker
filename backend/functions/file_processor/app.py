@@ -53,6 +53,10 @@ print("[FILE_PROCESSOR] About to execute: from common.validators import Validati
 from common.validators import ValidationEngine
 print("[FILE_PROCESSOR] Result: ValidationEngine imported from common.validators")
 
+print("[FILE_PROCESSOR] About to execute: from urllib.parse import unquote")
+from urllib.parse import unquote
+print("[FILE_PROCESSOR] Result: unquote imported from urllib.parse")
+
 
 print("[FILE_PROCESSOR] About to execute: s3_client = boto3.client('s3')")
 s3_client = boto3.client('s3')
@@ -196,8 +200,12 @@ def extract_metadata(event: dict, logger: StructuredLogger) -> dict:
     temp_file = tempfile.NamedTemporaryFile(delete=False, suffix='.xlsx')
     print(f"[FILE_PROCESSOR] Result: temp_file = {temp_file.name}")
 
-    print(f"[FILE_PROCESSOR] About to execute: s3_client.download_file({s3_bucket}, {s3_key}, {temp_file.name})")
-    s3_client.download_file(s3_bucket, s3_key, temp_file.name)
+    print(f"[FILE_PROCESSOR] About to execute: unquote({s3_key}) to decode URL-encoded S3 key")
+    s3_key_decoded = unquote(s3_key)
+    print(f"[FILE_PROCESSOR] Result: s3_key_decoded = {s3_key_decoded}")
+
+    print(f"[FILE_PROCESSOR] About to execute: s3_client.download_file({s3_bucket}, {s3_key_decoded}, {temp_file.name})")
+    s3_client.download_file(s3_bucket, s3_key_decoded, temp_file.name)
     print(f"[FILE_PROCESSOR] Result: file downloaded to {temp_file.name}")
 
     # Parse Excel file
@@ -632,8 +640,12 @@ def parse_records(event: dict, logger: StructuredLogger) -> dict:
     temp_file = tempfile.NamedTemporaryFile(delete=False, suffix='.xlsx')
     print(f"[FILE_PROCESSOR] Result: temp_file = {temp_file.name}")
 
-    print(f"[FILE_PROCESSOR] About to execute: s3_client.download_file({s3_bucket}, {s3_key}, {temp_file.name})")
-    s3_client.download_file(s3_bucket, s3_key, temp_file.name)
+    print(f"[FILE_PROCESSOR] About to execute: unquote({s3_key}) to decode URL-encoded S3 key")
+    s3_key_decoded = unquote(s3_key)
+    print(f"[FILE_PROCESSOR] Result: s3_key_decoded = {s3_key_decoded}")
+
+    print(f"[FILE_PROCESSOR] About to execute: s3_client.download_file({s3_bucket}, {s3_key_decoded}, {temp_file.name})")
+    s3_client.download_file(s3_bucket, s3_key_decoded, temp_file.name)
     print(f"[FILE_PROCESSOR] Result: file downloaded to {temp_file.name}")
 
     # Parse records
