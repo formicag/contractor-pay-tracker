@@ -487,7 +487,7 @@ resource "aws_sfn_state_machine" "contractor_pay_workflow" {
           {
             ErrorEquals = ["States.ALL"]
             ResultPath  = "$.error"
-            Next        = "MarkError"
+            Next        = "ProcessingFailedHandler"
           }
         ]
         TimeoutSeconds = 60
@@ -516,7 +516,7 @@ resource "aws_sfn_state_machine" "contractor_pay_workflow" {
           {
             ErrorEquals = ["States.ALL"]
             ResultPath  = "$.error"
-            Next        = "MarkError"
+            Next        = "ProcessingFailedHandler"
           }
         ]
         TimeoutSeconds = 30
@@ -545,7 +545,7 @@ resource "aws_sfn_state_machine" "contractor_pay_workflow" {
           {
             ErrorEquals = ["States.ALL"]
             ResultPath  = "$.error"
-            Next        = "MarkError"
+            Next        = "ProcessingFailedHandler"
           }
         ]
         TimeoutSeconds = 30
@@ -577,9 +577,9 @@ resource "aws_sfn_state_machine" "contractor_pay_workflow" {
         Type     = "Task"
         Resource = aws_lambda_function.file_processor.arn
         Parameters = {
-          "action"       = "supersede_existing"
-          "fileId.$"     = "$.fileId"
-          "duplicates.$" = "$.duplicates"
+          "action"             = "supersede_existing"
+          "fileId.$"           = "$.fileId"
+          "existing_file_id.$" = "$.duplicates.existing_file_id"
         }
         ResultPath = "$.superseded"
         Next       = "ParseRecords"
@@ -587,7 +587,7 @@ resource "aws_sfn_state_machine" "contractor_pay_workflow" {
           {
             ErrorEquals = ["States.ALL"]
             ResultPath  = "$.error"
-            Next        = "MarkError"
+            Next        = "ProcessingFailedHandler"
           }
         ]
         TimeoutSeconds = 60
@@ -619,7 +619,7 @@ resource "aws_sfn_state_machine" "contractor_pay_workflow" {
           {
             ErrorEquals = ["States.ALL"]
             ResultPath  = "$.error"
-            Next        = "MarkError"
+            Next        = "ProcessingFailedHandler"
           }
         ]
         TimeoutSeconds = 300
@@ -647,7 +647,7 @@ resource "aws_sfn_state_machine" "contractor_pay_workflow" {
           {
             ErrorEquals = ["States.ALL"]
             ResultPath  = "$.error"
-            Next        = "MarkError"
+            Next        = "ProcessingFailedHandler"
           }
         ]
         TimeoutSeconds = 120
@@ -668,7 +668,7 @@ resource "aws_sfn_state_machine" "contractor_pay_workflow" {
           {
             Variable      = "$.validation.hasCriticalErrors"
             BooleanEquals = true
-            Next          = "MarkError"
+            Next          = "ValidationErrorHandler"
           }
         ]
         Default = "ImportRecords"
@@ -690,7 +690,7 @@ resource "aws_sfn_state_machine" "contractor_pay_workflow" {
           {
             ErrorEquals = ["States.ALL"]
             ResultPath  = "$.error"
-            Next        = "MarkError"
+            Next        = "ProcessingFailedHandler"
           }
         ]
         TimeoutSeconds = 300
@@ -704,7 +704,7 @@ resource "aws_sfn_state_machine" "contractor_pay_workflow" {
         ]
       }
 
-      # Step 9a: Mark Complete
+      # Step 9a: Mark Complete - Mark file as successfully processed
       MarkComplete = {
         Type     = "Task"
         Resource = aws_lambda_function.file_processor.arn
@@ -726,12 +726,34 @@ resource "aws_sfn_state_machine" "contractor_pay_workflow" {
         ]
       }
 
-      # Step 9b: Mark Error
-      MarkError = {
+      # Validation Error Handler - Mark file with validation errors, no import
+      ValidationErrorHandler = {
         Type     = "Task"
         Resource = aws_lambda_function.file_processor.arn
         Parameters = {
-          "action"   = "mark_error"
+          "action"              = "mark_error"
+          "fileId.$"            = "$.fileId"
+          "validation_errors.$" = "$.validation.errors"
+        }
+        ResultPath     = "$.errorMarked"
+        Next           = "Failed"
+        TimeoutSeconds = 30
+        Retry = [
+          {
+            ErrorEquals     = ["States.TaskFailed", "Lambda.ServiceException"]
+            IntervalSeconds = 1
+            MaxAttempts     = 2
+            BackoffRate     = 1.5
+          }
+        ]
+      }
+
+      # Processing Failed Handler - Mark file as failed due to system error
+      ProcessingFailedHandler = {
+        Type     = "Task"
+        Resource = aws_lambda_function.file_processor.arn
+        Parameters = {
+          "action"   = "mark_failed"
           "fileId.$" = "$.fileId"
           "error.$"  = "$.error"
         }
