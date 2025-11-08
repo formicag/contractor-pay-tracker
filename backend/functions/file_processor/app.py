@@ -271,7 +271,8 @@ def match_period(event: dict, logger: StructuredLogger) -> dict:
             if response.get('Items'):
                 umbrella = response['Items'][0]
                 umbrella_id = umbrella['UmbrellaID']
-                print(f"[FILE_PROCESSOR] Successfully retrieved umbrella from ID: {umbrella_id}")
+                umbrella_code = umbrella.get('UmbrellaCode', 'UNKNOWN')
+                print(f"[FILE_PROCESSOR] Successfully retrieved umbrella from ID: {umbrella_id} with code: {umbrella_code}")
             else:
                 print("[FILE_PROCESSOR] About to execute: raise ValueError for missing umbrella company")
                 raise ValueError(f"Could not determine umbrella company. No umbrella_code in filename and umbrella_id '{umbrella_id_from_meta}' not found in database")
