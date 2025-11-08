@@ -60,7 +60,7 @@
       "Type": "Choice",
       "Choices": [
         {
-          "Variable": "$.duplicate_check.hasDuplicates",
+          "Variable": "$.duplicate_check.duplicate_found",
           "BooleanEquals": true,
           "Next": "AutoSupersede"
         }
@@ -150,7 +150,7 @@
         "file_id.$": "$.file_id",
         "import_result.$": "$.import_result",
         "has_warnings.$": "$.validation_result.has_warnings",
-        "was_supersede.$": "$.duplicate_check.hasDuplicates",
+        "was_supersede.$": "$.duplicate_check.duplicate_found",
         "action": "mark_complete"
       },
       "ResultPath": "$.final_result",
