@@ -1,0 +1,19 @@
+# Common layer dependencies for contractor pay tracking
+# Shared across all Lambda functions
+
+# AWS SDK (already included in Lambda runtime, but explicit for local dev)
+boto3>=1.34.0
+
+# Excel file processing
+openpyxl>=3.1.2
+pandas>=2.1.0
+
+# Fuzzy string matching for name validation
+python-Levenshtein>=0.23.0
+fuzzywuzzy>=0.18.0
+
+# Date/time handling
+python-dateutil>=2.8.2
+
+# Validation and data handling
+jsonschema>=4.20.0

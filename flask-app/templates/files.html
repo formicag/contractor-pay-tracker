@@ -1,0 +1,216 @@
+{% extends "base.html" %}
+
+{% block title %}Files - {{ app_name }}{% endblock %}
+
+{% block extra_css %}
+<style>
+    .filters {
+        margin-bottom: 20px;
+        display: flex;
+        gap: 15px;
+        align-items: center;
+    }
+
+    .filters select {
+        padding: 8px 12px;
+        border: 1px solid #ddd;
+        border-radius: 4px;
+        font-size: 14px;
+    }
+
+    .file-actions {
+        display: flex;
+        gap: 10px;
+    }
+
+    .file-actions button {
+        padding: 6px 12px;
+        font-size: 12px;
+    }
+
+    .empty-state {
+        text-align: center;
+        padding: 60px 20px;
+        color: #999;
+    }
+
+    .empty-state-icon {
+        font-size: 64px;
+        margin-bottom: 20px;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<h2>Uploaded Files</h2>
+
+<div class="filters">
+    <label>
+        <strong>Filter by status:</strong>
+        <select id="status-filter" onchange="filterFiles()">
+            <option value="all">All Files</option>
+            <option value="COMPLETED">Completed</option>
+            <option value="COMPLETED_WITH_WARNINGS">Completed with Warnings</option>
+            <option value="ERROR">Errors</option>
+            <option value="PROCESSING">Processing</option>
+        </select>
+    </label>
+
+    <label>
+        <strong>Filter by umbrella:</strong>
+        <select id="umbrella-filter" onchange="filterFiles()">
+            <option value="all">All Umbrellas</option>
+            <option value="NASA">NASA</option>
+            <option value="PARASOL">PARASOL</option>
+            <option value="GIANT">GIANT</option>
+            <option value="PAYSTREAM">PAYSTREAM</option>
+            <option value="BROOKSON">BROOKSON</option>
+            <option value="APSCO">APSCo</option>
+        </select>
+    </label>
+
+    <button class="btn" onclick="loadFiles()">Refresh</button>
+</div>
+
+<div id="files-container">
+    <p>Loading files...</p>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    let allFiles = [];
+
+    // Load files on page load
+    window.addEventListener('DOMContentLoaded', () => {
+        loadFiles();
+    });
+
+    async function loadFiles() {
+        const container = document.getElementById('files-container');
+        container.innerHTML = '<p>Loading files...</p>';
+
+        try {
+            const response = await fetch('/api/files');
+            const data = await response.json();
+
+            allFiles = data.files;
+            displayFiles(allFiles);
+        } catch (error) {
+            container.innerHTML = '<p class="alert alert-error">Failed to load files: ' + error.message + '</p>';
+        }
+    }
+
+    function displayFiles(files) {
+        const container = document.getElementById('files-container');
+
+        if (files.length === 0) {
+            container.innerHTML = `
+                <div class="empty-state">
+                    <div class="empty-state-icon">📄</div>
+                    <h3>No files found</h3>
+                    <p>Upload your first contractor pay file to get started</p>
+                    <a href="/upload" class="btn btn-success" style="margin-top: 20px;">Upload File</a>
+                </div>
+            `;
+            return;
+        }
+
+        let html = `
+            <table>
+                <thead>
+                    <tr>
+                        <th>Filename</th>
+                        <th>Umbrella</th>
+                        <th>Period</th>
+                        <th>Status</th>
+                        <th>Records</th>
+                        <th>Uploaded</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+        `;
+
+        files.forEach(file => {
+            const statusBadge = getStatusBadge(file.status);
+            const uploadedDate = new Date(file.uploaded_at).toLocaleString();
+
+            html += `
+                <tr>
+                    <td><strong>${file.filename}</strong></td>
+                    <td>${file.umbrella}</td>
+                    <td>Period ${file.period}</td>
+                    <td>${statusBadge}</td>
+                    <td>${file.records || 0}${file.warnings ? ` (${file.warnings} warnings)` : ''}</td>
+                    <td>${uploadedDate}</td>
+                    <td>
+                        <div class="file-actions">
+                            <a href="/file/${file.file_id}" class="btn">View</a>
+                            <button class="btn btn-danger" onclick="deleteFile('${file.file_id}', '${file.filename}')">Delete</button>
+                        </div>
+                    </td>
+                </tr>
+            `;
+        });
+
+        html += `
+                </tbody>
+            </table>
+        `;
+
+        container.innerHTML = html;
+    }
+
+    function getStatusBadge(status) {
+        const badges = {
+            'COMPLETED': '<span class="badge badge-success">Completed</span>',
+            'COMPLETED_WITH_WARNINGS': '<span class="badge badge-warning">Completed (Warnings)</span>',
+            'ERROR': '<span class="badge badge-error">Error</span>',
+            'PROCESSING': '<span class="badge" style="background: #d1ecf1; color: #0c5460;">Processing</span>',
+            'UPLOADED': '<span class="badge" style="background: #e2e3e5; color: #383d41;">Uploaded</span>'
+        };
+
+        return badges[status] || status;
+    }
+
+    function filterFiles() {
+        const statusFilter = document.getElementById('status-filter').value;
+        const umbrellaFilter = document.getElementById('umbrella-filter').value;
+
+        let filtered = allFiles;
+
+        if (statusFilter !== 'all') {
+            filtered = filtered.filter(f => f.status === statusFilter);
+        }
+
+        if (umbrellaFilter !== 'all') {
+            filtered = filtered.filter(f => f.umbrella === umbrellaFilter);
+        }
+
+        displayFiles(filtered);
+    }
+
+    async function deleteFile(fileId, filename) {
+        if (!confirm(`Are you sure you want to delete "${filename}"?\n\nThis will mark the file as deleted and deactivate all associated records.`)) {
+            return;
+        }
+
+        try {
+            const response = await fetch(`/api/file/${fileId}`, {
+                method: 'DELETE'
+            });
+
+            if (response.ok) {
+                alert('File deleted successfully');
+                loadFiles(); // Reload the list
+            } else {
+                const error = await response.json();
+                alert('Delete failed: ' + (error.error || 'Unknown error'));
+            }
+        } catch (error) {
+            alert('Delete failed: ' + error.message);
+        }
+    }
+</script>
+{% endblock %}

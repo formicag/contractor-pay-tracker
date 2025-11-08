@@ -1,0 +1,257 @@
+{% extends "base.html" %}
+
+{% block title %}Upload File - {{ app_name }}{% endblock %}
+
+{% block extra_css %}
+<style>
+    .upload-area {
+        border: 3px dashed #ddd;
+        border-radius: 8px;
+        padding: 60px 20px;
+        text-align: center;
+        cursor: pointer;
+        transition: all 0.3s;
+        margin: 20px 0;
+    }
+
+    .upload-area:hover,
+    .upload-area.dragover {
+        border-color: #3498db;
+        background: #f0f8ff;
+    }
+
+    .upload-area.uploading {
+        border-color: #27ae60;
+        background: #f0fff4;
+    }
+
+    .upload-icon {
+        font-size: 48px;
+        color: #bbb;
+        margin-bottom: 20px;
+    }
+
+    .upload-area.dragover .upload-icon {
+        color: #3498db;
+    }
+
+    #file-input {
+        display: none;
+    }
+
+    .file-info {
+        margin-top: 20px;
+        padding: 15px;
+        background: #f8f9fa;
+        border-radius: 4px;
+        display: none;
+    }
+
+    .progress-bar {
+        width: 100%;
+        height: 30px;
+        background: #e0e0e0;
+        border-radius: 4px;
+        overflow: hidden;
+        margin: 20px 0;
+        display: none;
+    }
+
+    .progress-fill {
+        height: 100%;
+        background: linear-gradient(90deg, #3498db, #2ecc71);
+        width: 0%;
+        transition: width 0.3s;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        color: white;
+        font-weight: 600;
+    }
+
+    .recent-uploads {
+        margin-top: 40px;
+    }
+
+    .recent-uploads h3 {
+        margin-bottom: 20px;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<h2>Upload Contractor Pay File</h2>
+
+<div class="alert alert-info">
+    <strong>Supported formats:</strong> Excel (.xlsx) files from NASA, PARASOL, GIANT, PAYSTREAM, BROOKSON, or APSCo
+</div>
+
+<div class="upload-area" id="upload-area">
+    <div class="upload-icon">📁</div>
+    <h3>Drag and drop your file here</h3>
+    <p>or</p>
+    <button class="btn btn-success" onclick="document.getElementById('file-input').click()">
+        Choose File
+    </button>
+    <input type="file" id="file-input" accept=".xlsx" />
+</div>
+
+<div class="file-info" id="file-info">
+    <p><strong>Selected file:</strong> <span id="file-name"></span></p>
+    <p><strong>Size:</strong> <span id="file-size"></span></p>
+    <button class="btn" onclick="uploadFile()">Upload</button>
+    <button class="btn btn-danger" onclick="clearFile()">Clear</button>
+</div>
+
+<div class="progress-bar" id="progress-bar">
+    <div class="progress-fill" id="progress-fill">0%</div>
+</div>
+
+<div class="recent-uploads">
+    <h3>Recent Uploads</h3>
+    <p style="color: #666;">Your recently uploaded files will appear here.</p>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    const uploadArea = document.getElementById('upload-area');
+    const fileInput = document.getElementById('file-input');
+    const fileInfo = document.getElementById('file-info');
+    const fileNameSpan = document.getElementById('file-name');
+    const fileSizeSpan = document.getElementById('file-size');
+    const progressBar = document.getElementById('progress-bar');
+    const progressFill = document.getElementById('progress-fill');
+
+    let selectedFile = null;
+
+    // Prevent default drag behaviors
+    ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
+        uploadArea.addEventListener(eventName, preventDefaults, false);
+        document.body.addEventListener(eventName, preventDefaults, false);
+    });
+
+    function preventDefaults(e) {
+        e.preventDefault();
+        e.stopPropagation();
+    }
+
+    // Highlight drop area when dragging over
+    ['dragenter', 'dragover'].forEach(eventName => {
+        uploadArea.addEventListener(eventName, () => {
+            uploadArea.classList.add('dragover');
+        }, false);
+    });
+
+    ['dragleave', 'drop'].forEach(eventName => {
+        uploadArea.addEventListener(eventName, () => {
+            uploadArea.classList.remove('dragover');
+        }, false);
+    });
+
+    // Handle dropped files
+    uploadArea.addEventListener('drop', (e) => {
+        const dt = e.dataTransfer;
+        const files = dt.files;
+        handleFiles(files);
+    }, false);
+
+    // Handle file input change
+    fileInput.addEventListener('change', (e) => {
+        handleFiles(e.target.files);
+    });
+
+    function handleFiles(files) {
+        if (files.length === 0) return;
+
+        const file = files[0];
+
+        // Validate file type
+        if (!file.name.endsWith('.xlsx')) {
+            alert('Please select an Excel (.xlsx) file');
+            return;
+        }
+
+        selectedFile = file;
+
+        // Display file info
+        fileNameSpan.textContent = file.name;
+        fileSizeSpan.textContent = formatBytes(file.size);
+        fileInfo.style.display = 'block';
+        uploadArea.style.display = 'none';
+    }
+
+    function clearFile() {
+        selectedFile = null;
+        fileInput.value = '';
+        fileInfo.style.display = 'none';
+        uploadArea.style.display = 'block';
+        progressBar.style.display = 'none';
+        progressFill.style.width = '0%';
+    }
+
+    async function uploadFile() {
+        if (!selectedFile) return;
+
+        const formData = new FormData();
+        formData.append('file', selectedFile);
+
+        // Show progress bar
+        progressBar.style.display = 'block';
+        uploadArea.classList.add('uploading');
+
+        // Simulate progress (in real implementation, track actual upload progress)
+        let progress = 0;
+        const interval = setInterval(() => {
+            progress += 10;
+            if (progress <= 90) {
+                progressFill.style.width = progress + '%';
+                progressFill.textContent = progress + '%';
+            }
+        }, 200);
+
+        try {
+            const response = await fetch('/api/upload', {
+                method: 'POST',
+                body: formData
+            });
+
+            clearInterval(interval);
+
+            if (response.ok) {
+                const data = await response.json();
+
+                // Complete progress
+                progressFill.style.width = '100%';
+                progressFill.textContent = '100%';
+
+                setTimeout(() => {
+                    alert('File uploaded successfully!\n\nFilename: ' + selectedFile.name);
+                    clearFile();
+                    uploadArea.classList.remove('uploading');
+                    // Redirect to files page
+                    // window.location.href = '/files';
+                }, 500);
+            } else {
+                const error = await response.json();
+                alert('Upload failed: ' + (error.error || 'Unknown error'));
+                progressBar.style.display = 'none';
+                uploadArea.classList.remove('uploading');
+            }
+        } catch (error) {
+            clearInterval(interval);
+            alert('Upload failed: ' + error.message);
+            progressBar.style.display = 'none';
+            uploadArea.classList.remove('uploading');
+        }
+    }
+
+    function formatBytes(bytes) {
+        if (bytes === 0) return '0 Bytes';
+        const k = 1024;
+        const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+        const i = Math.floor(Math.log(bytes) / Math.log(k));
+        return Math.round(bytes / Math.pow(k, i) * 100) / 100 + ' ' + sizes[i];
+    }
+</script>
+{% endblock %}

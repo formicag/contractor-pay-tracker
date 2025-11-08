@@ -1,0 +1,2 @@
+# File upload handler dependencies
+boto3>=1.34.0

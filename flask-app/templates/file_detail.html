@@ -1,0 +1,236 @@
+{% extends "base.html" %}
+
+{% block title %}File Details - {{ app_name }}{% endblock %}
+
+{% block extra_css %}
+<style>
+    .file-header {
+        background: #f8f9fa;
+        padding: 20px;
+        border-radius: 4px;
+        margin-bottom: 30px;
+    }
+
+    .file-header h2 {
+        margin-bottom: 15px;
+    }
+
+    .file-meta {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+        gap: 15px;
+        margin-top: 15px;
+    }
+
+    .file-meta-item {
+        padding: 10px;
+        background: white;
+        border-radius: 4px;
+        border: 1px solid #e0e0e0;
+    }
+
+    .file-meta-item strong {
+        display: block;
+        color: #666;
+        font-size: 12px;
+        margin-bottom: 5px;
+    }
+
+    .section {
+        margin-top: 30px;
+    }
+
+    .error-item,
+    .warning-item {
+        padding: 15px;
+        margin-bottom: 10px;
+        border-radius: 4px;
+        border-left: 4px solid;
+    }
+
+    .error-item {
+        background: #fff5f5;
+        border-left-color: #e74c3c;
+    }
+
+    .warning-item {
+        background: #fffbf0;
+        border-left-color: #f39c12;
+    }
+
+    .error-item strong,
+    .warning-item strong {
+        display: block;
+        margin-bottom: 5px;
+    }
+
+    .empty-state {
+        text-align: center;
+        padding: 40px 20px;
+        color: #999;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<a href="/files" style="color: #3498db; text-decoration: none;">← Back to Files</a>
+
+<div id="file-detail-container">
+    <p>Loading file details...</p>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    const fileId = "{{ file_id }}";
+
+    window.addEventListener('DOMContentLoaded', () => {
+        loadFileDetail();
+    });
+
+    async function loadFileDetail() {
+        const container = document.getElementById('file-detail-container');
+
+        try {
+            const response = await fetch(`/api/file/${fileId}`);
+            const file = await response.json();
+
+            displayFileDetail(file);
+        } catch (error) {
+            container.innerHTML = '<p class="alert alert-error">Failed to load file details: ' + error.message + '</p>';
+        }
+    }
+
+    function displayFileDetail(file) {
+        const container = document.getElementById('file-detail-container');
+        const statusBadge = getStatusBadge(file.status);
+
+        let html = `
+            <div class="file-header">
+                <h2>${file.filename}</h2>
+                ${statusBadge}
+
+                <div class="file-meta">
+                    <div class="file-meta-item">
+                        <strong>Umbrella Company</strong>
+                        ${file.umbrella}
+                    </div>
+                    <div class="file-meta-item">
+                        <strong>Pay Period</strong>
+                        Period ${file.period}
+                    </div>
+                    <div class="file-meta-item">
+                        <strong>Uploaded</strong>
+                        ${new Date(file.uploaded_at).toLocaleString()}
+                    </div>
+                    <div class="file-meta-item">
+                        <strong>Total Records</strong>
+                        ${file.total_records}
+                    </div>
+                    <div class="file-meta-item">
+                        <strong>Valid Records</strong>
+                        ${file.valid_records}
+                    </div>
+                </div>
+            </div>
+        `;
+
+        // Errors section
+        if (file.errors && file.errors.length > 0) {
+            html += `
+                <div class="section">
+                    <h3>❌ Validation Errors (${file.errors.length})</h3>
+                    <p style="color: #666; margin-bottom: 15px;">These CRITICAL errors blocked the import of all records.</p>
+            `;
+
+            file.errors.forEach(error => {
+                html += `
+                    <div class="error-item">
+                        <strong>Row ${error.row_number}: ${error.contractor_name || error.employee_id}</strong>
+                        <p>${error.error_message}</p>
+                        ${error.suggested_fix ? `<p style="color: #666; font-style: italic; margin-top: 5px;">💡 ${error.suggested_fix}</p>` : ''}
+                    </div>
+                `;
+            });
+
+            html += `</div>`;
+        }
+
+        // Warnings section
+        if (file.warnings && file.warnings.length > 0) {
+            html += `
+                <div class="section">
+                    <h3>⚠️ Validation Warnings (${file.warnings.length})</h3>
+                    <p style="color: #666; margin-bottom: 15px;">These warnings did not block the import, but should be reviewed.</p>
+            `;
+
+            file.warnings.forEach(warning => {
+                html += `
+                    <div class="warning-item">
+                        <strong>Row ${warning.row_number}</strong>
+                        <p>${warning.warning_message}</p>
+                        ${warning.resolution_notes ? `<p style="color: #666; font-style: italic; margin-top: 5px;">✓ ${warning.resolution_notes}</p>` : ''}
+                    </div>
+                `;
+            });
+
+            html += `</div>`;
+        }
+
+        // Success state
+        if ((!file.errors || file.errors.length === 0) && (!file.warnings || file.warnings.length === 0)) {
+            html += `
+                <div class="section">
+                    <div class="empty-state">
+                        <div style="font-size: 48px; margin-bottom: 15px;">✅</div>
+                        <h3>All Validations Passed</h3>
+                        <p>This file was processed successfully with no errors or warnings.</p>
+                    </div>
+                </div>
+            `;
+        }
+
+        // Actions
+        html += `
+            <div class="section">
+                <button class="btn btn-danger" onclick="deleteFile()">Delete File</button>
+            </div>
+        `;
+
+        container.innerHTML = html;
+    }
+
+    function getStatusBadge(status) {
+        const badges = {
+            'COMPLETED': '<span class="badge badge-success">Completed</span>',
+            'COMPLETED_WITH_WARNINGS': '<span class="badge badge-warning">Completed with Warnings</span>',
+            'ERROR': '<span class="badge badge-error">Error</span>',
+            'PROCESSING': '<span class="badge" style="background: #d1ecf1; color: #0c5460;">Processing</span>'
+        };
+
+        return badges[status] || status;
+    }
+
+    async function deleteFile() {
+        if (!confirm('Are you sure you want to delete this file?\n\nThis will mark the file as deleted and deactivate all associated records.')) {
+            return;
+        }
+
+        try {
+            const response = await fetch(`/api/file/${fileId}`, {
+                method: 'DELETE'
+            });
+
+            if (response.ok) {
+                alert('File deleted successfully');
+                window.location.href = '/files';
+            } else {
+                const error = await response.json();
+                alert('Delete failed: ' + (error.error || 'Unknown error'));
+            }
+        } catch (error) {
+            alert('Delete failed: ' + error.message);
+        }
+    }
+</script>
+{% endblock %}

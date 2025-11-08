@@ -1,0 +1,450 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: Contractor Pay Tracking System - Serverless with DynamoDB (< £5/month)
+
+Parameters:
+  Environment:
+    Type: String
+    Default: development
+    AllowedValues:
+      - development
+      - production
+    Description: Environment name
+
+  LogLevel:
+    Type: String
+    Default: DEBUG
+    AllowedValues:
+      - DEBUG
+      - INFO
+      - WARNING
+      - ERROR
+    Description: Lambda function logging level
+
+Globals:
+  Function:
+    Runtime: python3.11
+    Architectures:
+      - arm64
+    Timeout: 30
+    MemorySize: 512
+    Environment:
+      Variables:
+        ENVIRONMENT: !Ref Environment
+        LOG_LEVEL: !Ref LogLevel
+        TABLE_NAME: !Ref ContractorPayTable
+        S3_BUCKET_NAME: !Ref PayFilesBucket
+
+Resources:
+  # ============================================================================
+  # DYNAMODB TABLE (SINGLE-TABLE DESIGN)
+  # ============================================================================
+  # Cost: £0.25/GB storage + £1.25 per million reads + £1.56 per million writes
+  # Estimated: < £1/month for your usage
+  # ============================================================================
+  ContractorPayTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub contractor-pay-${Environment}
+      BillingMode: PAY_PER_REQUEST  # On-demand pricing - no provisioned capacity
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      SSESpecification:
+        SSEEnabled: true
+      StreamSpecification:
+        StreamViewType: NEW_AND_OLD_IMAGES  # For audit trail
+      AttributeDefinitions:
+        # Primary Key
+        - AttributeName: PK
+          AttributeType: S
+        - AttributeName: SK
+          AttributeType: S
+        # GSI1 for reverse lookups (umbrella->contractors, period+umbrella->files)
+        - AttributeName: GSI1PK
+          AttributeType: S
+        - AttributeName: GSI1SK
+          AttributeType: S
+        # GSI2 for name-based lookups (fuzzy matching)
+        - AttributeName: GSI2PK
+          AttributeType: S
+        - AttributeName: GSI2SK
+          AttributeType: S
+        # GSI3 for time-based queries (recent uploads, etc.)
+        - AttributeName: GSI3PK
+          AttributeType: S
+        - AttributeName: GSI3SK
+          AttributeType: S
+      KeySchema:
+        - AttributeName: PK
+          KeyType: HASH
+        - AttributeName: SK
+          KeyType: RANGE
+      GlobalSecondaryIndexes:
+        - IndexName: GSI1
+          KeySchema:
+            - AttributeName: GSI1PK
+              KeyType: HASH
+            - AttributeName: GSI1SK
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+        - IndexName: GSI2
+          KeySchema:
+            - AttributeName: GSI2PK
+              KeyType: HASH
+            - AttributeName: GSI2SK
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+        - IndexName: GSI3
+          KeySchema:
+            - AttributeName: GSI3PK
+              KeyType: HASH
+            - AttributeName: GSI3SK
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Application
+          Value: contractor-pay-tracker
+
+  # ============================================================================
+  # S3 BUCKET FOR PAY FILES
+  # ============================================================================
+  # Cost: £0.023/GB storage + £0.0043 per 1000 PUT requests
+  # Estimated: < £0.50/month
+  # ============================================================================
+  PayFilesBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub contractor-pay-files-${Environment}-${AWS::AccountId}
+      VersioningConfiguration:
+        Status: Enabled
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      LifecycleConfiguration:
+        Rules:
+          - Id: ArchiveOldFiles
+            Status: Enabled
+            Transitions:
+              - TransitionInDays: 730
+                StorageClass: GLACIER
+            NoncurrentVersionTransitions:
+              - TransitionInDays: 90
+                StorageClass: GLACIER
+      NotificationConfiguration:
+        LambdaConfigurations:
+          - Event: s3:ObjectCreated:*
+            Function: !GetAtt FileUploadHandlerFunction.Arn
+            Filter:
+              S3Key:
+                Rules:
+                  - Name: suffix
+                    Value: .xlsx
+
+  S3InvokeLambdaPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref FileUploadHandlerFunction
+      Action: lambda:InvokeFunction
+      Principal: s3.amazonaws.com
+      SourceArn: !Sub arn:aws:s3:::contractor-pay-files-${Environment}-${AWS::AccountId}
+
+  # ============================================================================
+  # LAMBDA LAYER (SHARED DEPENDENCIES)
+  # ============================================================================
+  CommonLayer:
+    Type: AWS::Serverless::LayerVersion
+    Properties:
+      LayerName: !Sub contractor-pay-common-${Environment}
+      Description: Common utilities (DynamoDB, S3, fuzzy matching)
+      ContentUri: layers/common/
+      CompatibleRuntimes:
+        - python3.11
+      CompatibleArchitectures:
+        - arm64
+    Metadata:
+      BuildMethod: python3.11
+
+  # ============================================================================
+  # LAMBDA FUNCTIONS
+  # ============================================================================
+  FileUploadHandlerFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub contractor-pay-file-upload-handler-${Environment}
+      CodeUri: functions/file_upload_handler/
+      Handler: app.lambda_handler
+      Description: Handles file uploads to S3 and creates DynamoDB metadata
+      Timeout: 30
+      MemorySize: 512
+      Layers:
+        - !Ref CommonLayer
+      Policies:
+        - S3CrudPolicy:
+            BucketName: !Ref PayFilesBucket
+        - DynamoDBCrudPolicy:
+            TableName: !Ref ContractorPayTable
+        - Statement:
+            - Effect: Allow
+              Action:
+                - states:StartExecution
+              Resource: !Ref PayFileProcessingStateMachine
+      Events:
+        UploadApi:
+          Type: Api
+          Properties:
+            RestApiId: !Ref ApiGateway
+            Path: /api/v1/upload
+            Method: POST
+
+  FileProcessorFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub contractor-pay-file-processor-${Environment}
+      CodeUri: functions/file_processor/
+      Handler: app.lambda_handler
+      Description: Processes Excel files and validates data
+      Timeout: 300
+      MemorySize: 1024
+      Layers:
+        - !Ref CommonLayer
+      Policies:
+        - S3CrudPolicy:
+            BucketName: !Ref PayFilesBucket
+        - DynamoDBCrudPolicy:
+            TableName: !Ref ContractorPayTable
+        - Statement:
+            - Effect: Allow
+              Action:
+                - states:StartExecution
+              Resource: !Ref PayFileProcessingStateMachine
+
+  ValidationEngineFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub contractor-pay-validation-engine-${Environment}
+      CodeUri: functions/validation_engine/
+      Handler: app.lambda_handler
+      Description: Validates pay records against business rules
+      Timeout: 120
+      MemorySize: 512
+      Layers:
+        - !Ref CommonLayer
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref ContractorPayTable
+
+  ReportGeneratorFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub contractor-pay-report-generator-${Environment}
+      CodeUri: functions/report_generator/
+      Handler: app.lambda_handler
+      Description: Generates reports and analytics
+      Timeout: 30
+      MemorySize: 512
+      Layers:
+        - !Ref CommonLayer
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref ContractorPayTable
+      Events:
+        GetSummaryApi:
+          Type: Api
+          Properties:
+            RestApiId: !Ref ApiGateway
+            Path: /api/v1/reports/summary
+            Method: GET
+        GetContractorApi:
+          Type: Api
+          Properties:
+            RestApiId: !Ref ApiGateway
+            Path: /api/v1/reports/contractor/{contractor_id}
+            Method: GET
+        GetFilesApi:
+          Type: Api
+          Properties:
+            RestApiId: !Ref ApiGateway
+            Path: /api/v1/files
+            Method: GET
+        DeleteFileApi:
+          Type: Api
+          Properties:
+            RestApiId: !Ref ApiGateway
+            Path: /api/v1/files/{file_id}
+            Method: DELETE
+
+  CleanupHandlerFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub contractor-pay-cleanup-handler-${Environment}
+      CodeUri: functions/cleanup_handler/
+      Handler: app.lambda_handler
+      Description: Daily maintenance and cleanup tasks
+      Timeout: 300
+      MemorySize: 256
+      Layers:
+        - !Ref CommonLayer
+      Policies:
+        - S3CrudPolicy:
+            BucketName: !Ref PayFilesBucket
+        - DynamoDBCrudPolicy:
+            TableName: !Ref ContractorPayTable
+        - Statement:
+            - Effect: Allow
+              Action:
+                - logs:PutRetentionPolicy
+              Resource: '*'
+      Events:
+        DailyCleanup:
+          Type: Schedule
+          Properties:
+            Schedule: cron(0 2 * * ? *)
+            Description: Run daily cleanup at 2 AM UTC
+
+  # ============================================================================
+  # STEP FUNCTIONS STATE MACHINE
+  # ============================================================================
+  PayFileProcessingStateMachine:
+    Type: AWS::Serverless::StateMachine
+    Properties:
+      Name: !Sub contractor-pay-processing-${Environment}
+      DefinitionUri: statemachine/pay_file_processing.asl.json
+      DefinitionSubstitutions:
+        FileProcessorFunctionArn: !GetAtt FileProcessorFunction.Arn
+        ValidationEngineFunctionArn: !GetAtt ValidationEngineFunction.Arn
+      Policies:
+        - LambdaInvokePolicy:
+            FunctionName: !Ref FileProcessorFunction
+        - LambdaInvokePolicy:
+            FunctionName: !Ref ValidationEngineFunction
+
+  # ============================================================================
+  # API GATEWAY
+  # ============================================================================
+  # Cost: £3.50 per million requests (first 333M)
+  # Estimated: < £0.10/month for 1000 requests
+  # ============================================================================
+  ApiGateway:
+    Type: AWS::Serverless::Api
+    Properties:
+      Name: !Sub contractor-pay-api-${Environment}
+      StageName: prod
+      Cors:
+        AllowMethods: "'GET,POST,PUT,DELETE,OPTIONS'"
+        AllowHeaders: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token'"
+        AllowOrigin: "'*'"
+      TracingEnabled: true
+      MethodSettings:
+        - ResourcePath: /*
+          HttpMethod: '*'
+          LoggingLevel: INFO
+          DataTraceEnabled: true
+          MetricsEnabled: true
+
+  # ============================================================================
+  # CLOUDWATCH ALARMS
+  # ============================================================================
+  # Cost: First 10 alarms free, then £0.10/alarm/month
+  # Estimated: FREE (< 10 alarms)
+  # ============================================================================
+  AlertTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: !Sub contractor-pay-alerts-${Environment}
+      DisplayName: Contractor Pay Tracker Alerts
+
+  ProcessingErrorAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub contractor-pay-processing-errors-${Environment}
+      AlarmDescription: Alert when file processing fails
+      MetricName: Errors
+      Namespace: AWS/Lambda
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      Dimensions:
+        - Name: FunctionName
+          Value: !Ref FileProcessorFunction
+      AlarmActions:
+        - !Ref AlertTopic
+      TreatMissingData: notBreaching
+
+  DynamoDBThrottleAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub contractor-pay-dynamodb-throttle-${Environment}
+      AlarmDescription: Alert when DynamoDB requests are throttled
+      MetricName: UserErrors
+      Namespace: AWS/DynamoDB
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 5
+      ComparisonOperator: GreaterThanThreshold
+      Dimensions:
+        - Name: TableName
+          Value: !Ref ContractorPayTable
+      AlarmActions:
+        - !Ref AlertTopic
+      TreatMissingData: notBreaching
+
+  # ============================================================================
+  # OUTPUTS
+  # ============================================================================
+Outputs:
+  ApiUrl:
+    Description: API Gateway endpoint URL
+    Value: !Sub https://${ApiGateway}.execute-api.${AWS::Region}.amazonaws.com/prod
+    Export:
+      Name: !Sub ${AWS::StackName}-ApiUrl
+
+  S3BucketName:
+    Description: S3 bucket for pay files
+    Value: !Ref PayFilesBucket
+    Export:
+      Name: !Sub ${AWS::StackName}-BucketName
+
+  DynamoDBTableName:
+    Description: DynamoDB table name
+    Value: !Ref ContractorPayTable
+    Export:
+      Name: !Sub ${AWS::StackName}-TableName
+
+  StateMachineArn:
+    Description: Step Functions state machine ARN
+    Value: !Ref PayFileProcessingStateMachine
+
+  FileProcessorFunctionArn:
+    Description: File processor Lambda function ARN
+    Value: !GetAtt FileProcessorFunction.Arn
+
+  AlertTopicArn:
+    Description: SNS topic for alerts
+    Value: !Ref AlertTopic
+
+  EstimatedMonthlyCost:
+    Description: Estimated monthly cost (< £5)
+    Value: |
+      DynamoDB: £0.50 (1000 requests/month, < 1GB storage)
+      Lambda: £0.20 (200 invocations @ 512MB)
+      S3: £0.30 (500 files, 50KB each)
+      API Gateway: £0.10 (1000 requests)
+      Step Functions: £0.25 (100 executions)
+      CloudWatch Logs: £0.50 (1GB)
+      SNS: £0.05 (100 notifications)
+      ----------------------------------------
+      TOTAL: ~£1.90/month ✅ (Well under £5!)
