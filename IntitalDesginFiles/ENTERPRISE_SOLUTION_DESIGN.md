@@ -1238,7 +1238,7 @@ Get validation errors for review.
     "DuplicateChoice": {
       "Type": "Choice",
       "Choices": [{
-        "Variable": "$.duplicate_found",
+        "Variable": "$.hasDuplicates",
         "BooleanEquals": true,
         "Next": "HandleDuplicate"
       }],

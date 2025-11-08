@@ -611,6 +611,7 @@ resource "aws_sfn_state_machine" "contractor_pay_workflow" {
           "bucket.$"   = "$.s3_bucket"
           "key.$"      = "$.key"
           "metadata.$" = "$.metadata"
+          "period.$"   = "$.period"
         }
         ResultPath = "$.parsedRecords"
         Next       = "ValidateRecords"

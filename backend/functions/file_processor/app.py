@@ -197,8 +197,12 @@ def extract_metadata(event: dict, logger: StructuredLogger) -> dict:
     print(f"[FILE_PROCESSOR] Result: file downloaded to {temp_file.name}")
 
     # Parse Excel file
-    print(f"[FILE_PROCESSOR] About to execute: parser = PayFileParser({temp_file.name})")
-    parser = PayFileParser(temp_file.name)
+    print("[FILE_PROCESSOR] About to execute: extract original filename from S3 key")
+    original_filename = s3_key.split('/')[-1]
+    print(f"[FILE_PROCESSOR] Result: original_filename = {original_filename}")
+
+    print(f"[FILE_PROCESSOR] About to execute: parser = PayFileParser({temp_file.name}, {original_filename})")
+    parser = PayFileParser(temp_file.name, original_filename)
     print(f"[FILE_PROCESSOR] Result: parser created = {parser}")
 
     print("[FILE_PROCESSOR] About to execute: metadata = parser.extract_metadata()")
@@ -240,8 +244,8 @@ def match_period(event: dict, logger: StructuredLogger) -> dict:
     file_id = event['fileId']
     print(f"[FILE_PROCESSOR] Result: file_id = {file_id}")
 
-    print("[FILE_PROCESSOR] About to execute: metadata = event.get('metadata_result', {})")
-    metadata = event.get('metadata_result', {})
+    print("[FILE_PROCESSOR] About to execute: metadata = event.get('metadata', {})")
+    metadata = event.get('metadata', {})
     print(f"[FILE_PROCESSOR] Result: metadata = {metadata}")
 
     print(f"[FILE_PROCESSOR] About to execute: logger.info 'Matching period' for file_id = {file_id}")
@@ -255,30 +259,53 @@ def match_period(event: dict, logger: StructuredLogger) -> dict:
 
     print(f"[FILE_PROCESSOR] About to execute: check if not umbrella_code")
     if not umbrella_code:
-        print("[FILE_PROCESSOR] About to execute: raise ValueError for missing umbrella company")
-        raise ValueError("Could not determine umbrella company from filename")
+        print("[FILE_PROCESSOR] Umbrella code not found in metadata, attempting fallback methods")
+        # Fallback 1: Check for umbrella_id in metadata
+        umbrella_id_from_meta = metadata.get('umbrella_id')
+        if umbrella_id_from_meta:
+            print(f"[FILE_PROCESSOR] Found umbrella_id in metadata: {umbrella_id_from_meta}")
+            # Query DynamoDB by umbrella_id directly
+            response = dynamodb_client.table.query(
+                KeyConditionExpression='PK = :pk AND SK = :sk',
+                ExpressionAttributeValues={
+                    ':pk': f'UMBRELLA#{umbrella_id_from_meta}',
+                    ':sk': 'PROFILE'
+                }
+            )
+            if response.get('Items'):
+                umbrella = response['Items'][0]
+                umbrella_id = umbrella['UmbrellaID']
+                print(f"[FILE_PROCESSOR] Successfully retrieved umbrella from ID: {umbrella_id}")
+            else:
+                print("[FILE_PROCESSOR] About to execute: raise ValueError for missing umbrella company")
+                raise ValueError(f"Could not determine umbrella company. No umbrella_code in filename and umbrella_id '{umbrella_id_from_meta}' not found in database")
+        else:
+            print("[FILE_PROCESSOR] About to execute: raise ValueError for missing umbrella company")
+            raise ValueError("Could not determine umbrella company from filename or metadata. Please ensure filename contains umbrella company code (e.g., NASA, ABTG)")
+    else:
+        # Normal path: we have umbrella_code from filename
 
-    # Query DynamoDB for umbrella
-    print(f"[FILE_PROCESSOR] About to execute: dynamodb_client.table.query for umbrella_code = {umbrella_code}")
-    response = dynamodb_client.table.query(
-        IndexName='GSI2',
-        KeyConditionExpression='GSI2PK = :pk',
-        ExpressionAttributeValues={':pk': f'UMBRELLA_CODE#{umbrella_code}'}
-    )
-    print(f"[FILE_PROCESSOR] Result: query response = {response}")
+        # Query DynamoDB for umbrella
+        print(f"[FILE_PROCESSOR] About to execute: dynamodb_client.table.query for umbrella_code = {umbrella_code}")
+        response = dynamodb_client.table.query(
+            IndexName='GSI2',
+            KeyConditionExpression='GSI2PK = :pk',
+            ExpressionAttributeValues={':pk': f'UMBRELLA_CODE#{umbrella_code}'}
+        )
+        print(f"[FILE_PROCESSOR] Result: query response = {response}")
 
-    print("[FILE_PROCESSOR] About to execute: check if not response.get('Items')")
-    if not response.get('Items'):
-        print(f"[FILE_PROCESSOR] About to execute: raise ValueError for umbrella '{umbrella_code}' not found")
-        raise ValueError(f"Umbrella company '{umbrella_code}' not found")
+        print("[FILE_PROCESSOR] About to execute: check if not response.get('Items')")
+        if not response.get('Items'):
+            print(f"[FILE_PROCESSOR] About to execute: raise ValueError for umbrella '{umbrella_code}' not found")
+            raise ValueError(f"Umbrella company with code '{umbrella_code}' not found in database. Available codes: NASA, ABTG, FERN, etc.")
 
-    print("[FILE_PROCESSOR] About to execute: umbrella = response['Items'][0]")
-    umbrella = response['Items'][0]
-    print(f"[FILE_PROCESSOR] Result: umbrella = {umbrella}")
+        print("[FILE_PROCESSOR] About to execute: umbrella = response['Items'][0]")
+        umbrella = response['Items'][0]
+        print(f"[FILE_PROCESSOR] Result: umbrella = {umbrella}")
 
-    print("[FILE_PROCESSOR] About to execute: umbrella_id = umbrella['UmbrellaID']")
-    umbrella_id = umbrella['UmbrellaID']
-    print(f"[FILE_PROCESSOR] Result: umbrella_id = {umbrella_id}")
+        print("[FILE_PROCESSOR] About to execute: umbrella_id = umbrella['UmbrellaID']")
+        umbrella_id = umbrella['UmbrellaID']
+        print(f"[FILE_PROCESSOR] Result: umbrella_id = {umbrella_id}")
 
     # Determine period from submission date
     print("[FILE_PROCESSOR] About to execute: submission_date = metadata.get('submission_date')")
@@ -304,16 +331,26 @@ def match_period(event: dict, logger: StructuredLogger) -> dict:
 
     print("[FILE_PROCESSOR] About to execute: Parse submission_date to compare with period date ranges")
     try:
+        print(f"[FILE_PROCESSOR] About to execute: Validate submission_date format")
+        # Validate that submission_date is a string of 8 digits
+        if not submission_date or not isinstance(submission_date, str) or not submission_date.isdigit() or len(submission_date) != 8:
+            raise ValueError(f"Submission date must be 8 digits in DDMMYYYY format, got: '{submission_date}'")
+
         print(f"[FILE_PROCESSOR] About to execute: datetime.strptime({submission_date}, '%d%m%Y')")
         submission_dt = datetime.strptime(submission_date, '%d%m%Y')
         print(f"[FILE_PROCESSOR] Result: submission_dt = {submission_dt}")
+
+        # Additional validation: check date is reasonable (not in far future or past)
+        current_year = datetime.now().year
+        if submission_dt.year < 2000 or submission_dt.year > current_year + 5:
+            raise ValueError(f"Submission date year {submission_dt.year} is outside reasonable range (2000-{current_year + 5})")
 
         print("[FILE_PROCESSOR] About to execute: Format submission_dt to YYYY-MM-DD for comparison")
         submission_date_formatted = submission_dt.strftime('%Y-%m-%d')
         print(f"[FILE_PROCESSOR] Result: submission_date_formatted = {submission_date_formatted}")
     except ValueError as e:
         print(f"[FILE_PROCESSOR] About to execute: raise ValueError for invalid submission date format: {e}")
-        raise ValueError(f"Invalid submission date format '{submission_date}'. Expected DDMMYYYY format. Error: {e}")
+        raise ValueError(f"Invalid submission date format '{submission_date}'. Expected DDMMYYYY format (e.g., 29092025 for 29 Sep 2025). Error: {e}")
 
     print("[FILE_PROCESSOR] About to execute: Iterate through periods to find matching period")
     period = None
@@ -380,13 +417,21 @@ def check_duplicates(event: dict, logger: StructuredLogger) -> dict:
     file_id = event['fileId']
     print(f"[FILE_PROCESSOR] Result: file_id = {file_id}")
 
-    print("[FILE_PROCESSOR] About to execute: umbrella_id = event['umbrella_id']")
-    umbrella_id = event['umbrella_id']
+    print("[FILE_PROCESSOR] About to execute: umbrella_id = event.get('period', {}).get('umbrella_id')")
+    umbrella_id = event.get('period', {}).get('umbrella_id')
     print(f"[FILE_PROCESSOR] Result: umbrella_id = {umbrella_id}")
 
-    print("[FILE_PROCESSOR] About to execute: period_id = event['period_id']")
-    period_id = event['period_id']
+    if not umbrella_id:
+        print("[FILE_PROCESSOR] Error: umbrella_id not found in event['period']")
+        raise ValueError("Missing umbrella_id in period data")
+
+    print("[FILE_PROCESSOR] About to execute: period_id = event.get('period', {}).get('period_id')")
+    period_id = event.get('period', {}).get('period_id')
     print(f"[FILE_PROCESSOR] Result: period_id = {period_id}")
+
+    if not period_id:
+        print("[FILE_PROCESSOR] Error: period_id not found in event['period']")
+        raise ValueError("Missing period_id in period data")
 
     print(f"[FILE_PROCESSOR] About to execute: logger.info 'Checking duplicates' for file_id = {file_id}, umbrella_id = {umbrella_id}, period_id = {period_id}")
     logger.info("Checking duplicates", file_id=file_id, umbrella_id=umbrella_id, period_id=period_id)
@@ -417,10 +462,10 @@ def check_duplicates(event: dict, logger: StructuredLogger) -> dict:
         logger.info("Duplicate found - will supersede", existing_file_id=existing_files[0]['FileID'])
         print("[FILE_PROCESSOR] Result: logger.info executed successfully")
 
-        print("[FILE_PROCESSOR] About to execute: build return dict with duplicate_found = True")
+        print("[FILE_PROCESSOR] About to execute: build return dict with hasDuplicates = True")
         result = {
             'file_id': file_id,
-            'duplicate_found': True,
+            'hasDuplicates': True,
             'existing_file_id': existing_files[0]['FileID']
         }
         print(f"[FILE_PROCESSOR] Result: returning = {result}")
@@ -430,10 +475,10 @@ def check_duplicates(event: dict, logger: StructuredLogger) -> dict:
     logger.info("No duplicates found")
     print("[FILE_PROCESSOR] Result: logger.info executed successfully")
 
-    print("[FILE_PROCESSOR] About to execute: build return dict with duplicate_found = False")
+    print("[FILE_PROCESSOR] About to execute: build return dict with hasDuplicates = False")
     result = {
         'file_id': file_id,
-        'duplicate_found': False
+        'hasDuplicates': False
     }
     print(f"[FILE_PROCESSOR] Result: returning = {result}")
     return result
@@ -530,13 +575,21 @@ def parse_records(event: dict, logger: StructuredLogger) -> dict:
     file_id = event['fileId']
     print(f"[FILE_PROCESSOR] Result: file_id = {file_id}")
 
-    print("[FILE_PROCESSOR] About to execute: umbrella_id = event['umbrella_id']")
-    umbrella_id = event['umbrella_id']
+    print("[FILE_PROCESSOR] About to execute: umbrella_id = event.get('period', {}).get('umbrella_id')")
+    umbrella_id = event.get('period', {}).get('umbrella_id')
     print(f"[FILE_PROCESSOR] Result: umbrella_id = {umbrella_id}")
 
-    print("[FILE_PROCESSOR] About to execute: period_id = event['period_id']")
-    period_id = event['period_id']
+    if not umbrella_id:
+        print("[FILE_PROCESSOR] Error: umbrella_id not found in event['period']")
+        raise ValueError("Missing umbrella_id in period data")
+
+    print("[FILE_PROCESSOR] About to execute: period_id = event.get('period', {}).get('period_id')")
+    period_id = event.get('period', {}).get('period_id')
     print(f"[FILE_PROCESSOR] Result: period_id = {period_id}")
+
+    if not period_id:
+        print("[FILE_PROCESSOR] Error: period_id not found in event['period']")
+        raise ValueError("Missing period_id in period data")
 
     print(f"[FILE_PROCESSOR] About to execute: logger.info 'Parsing records' for file_id = {file_id}")
     logger.info("Parsing records", file_id=file_id)
