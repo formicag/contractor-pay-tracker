@@ -189,6 +189,9 @@ Resources:
       MemorySize: 512
       Layers:
         - !Ref CommonLayer
+      Environment:
+        Variables:
+          STATE_MACHINE_ARN: !Sub "arn:aws:states:${AWS::Region}:${AWS::AccountId}:stateMachine:contractor-pay-processing-${Environment}"
       Policies:
         - S3CrudPolicy:
             BucketName: !Ref PayFilesBucket
@@ -198,7 +201,7 @@ Resources:
             - Effect: Allow
               Action:
                 - states:StartExecution
-              Resource: !Ref PayFileProcessingStateMachine
+              Resource: !Sub "arn:aws:states:${AWS::Region}:${AWS::AccountId}:stateMachine:contractor-pay-processing-${Environment}"
       Events:
         UploadApi:
           Type: Api
