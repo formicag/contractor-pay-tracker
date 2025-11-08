@@ -150,6 +150,12 @@ class PayFileParser:
             print(f"[GET_COLUMN_MAPPING] Column {idx}: '{header_text}'")
             headers.append(header_text)
 
+        # Validate we have some non-empty headers
+        non_empty_headers = [h for h in headers if h]
+        if not non_empty_headers:
+            print(f"[GET_COLUMN_MAPPING] ERROR: No headers found in row {header_row}")
+            raise ValueError(f"No column headers found in row {header_row}")
+
         print(f"[GET_COLUMN_MAPPING] All headers: {headers}")
 
         # Map common variations to standard names
@@ -162,27 +168,30 @@ class PayFileParser:
             if 'employee' in header and 'id' in header:
                 print(f"[GET_COLUMN_MAPPING] Matched 'employee_id' at index {idx}")
                 column_map['employee_id'] = idx
-            elif 'surname' in header or 'last' in header:
+            elif 'surname' in header or 'last' in header or 'lastname' in header:
                 print(f"[GET_COLUMN_MAPPING] Matched 'surname' at index {idx}")
                 column_map['surname'] = idx
-            elif 'forename' in header or 'first' in header:
+            elif 'forename' in header or 'first' in header or 'firstname' in header:
                 print(f"[GET_COLUMN_MAPPING] Matched 'forename' at index {idx}")
                 column_map['forename'] = idx
-            elif header == 'unit' or 'days' in header:
+            elif 'unit' in header and 'day' in header:
                 print(f"[GET_COLUMN_MAPPING] Matched 'unit' at index {idx}")
                 column_map['unit'] = idx
-            elif 'rate' in header.lower() and 'day' in header.lower():
+            elif 'day' in header and 'rate' in header.lower():
                 print(f"[GET_COLUMN_MAPPING] Matched 'rate' at index {idx}")
                 column_map['rate'] = idx
             elif header == 'per':
                 print(f"[GET_COLUMN_MAPPING] Matched 'per' at index {idx}")
                 column_map['per'] = idx
-            elif header == 'amount' and 'vat' not in header:
+            elif 'amount' in header and 'vat' not in header and 'gross' not in header:
                 print(f"[GET_COLUMN_MAPPING] Matched 'amount' at index {idx}")
                 column_map['amount'] = idx
-            elif 'vat' in header and 'amount' not in header:
+            elif 'vat' in header:
                 print(f"[GET_COLUMN_MAPPING] Matched 'vat' at index {idx}")
                 column_map['vat'] = idx
+            elif 'gross' in header and 'amount' in header:
+                print(f"[GET_COLUMN_MAPPING] Matched 'gross_amount' at index {idx}")
+                column_map['gross_amount'] = idx
             elif 'total' in header and 'hours' in header:
                 print(f"[GET_COLUMN_MAPPING] Matched 'total_hours' at index {idx}")
                 column_map['total_hours'] = idx
@@ -196,6 +205,14 @@ class PayFileParser:
                 print(f"[GET_COLUMN_MAPPING] No match for header '{header}' at index {idx}")
 
         print(f"[GET_COLUMN_MAPPING] Final column map: {column_map}")
+
+        # Validate that essential columns were found
+        essential_cols = ['employee_id', 'surname', 'forename', 'amount']
+        missing_cols = [col for col in essential_cols if col not in column_map]
+        if missing_cols:
+            print(f"[GET_COLUMN_MAPPING] ERROR: Missing essential columns: {missing_cols}")
+            raise ValueError(f"Missing essential columns: {missing_cols}. Found columns: {list(column_map.keys())}")
+
         return column_map
 
     def _parse_row(self, row, column_map: Dict[str, int], row_number: int, row_idx: int) -> Optional[Dict]:
@@ -399,8 +416,23 @@ class PayFileParser:
         if date_match:
             date_str = date_match.group(1)
             print(f"[EXTRACT_SUBMISSION_DATE] Extracted date string: {date_str}")
-            submission_date = date_str
-            print(f"[EXTRACT_SUBMISSION_DATE] Parsed submission_date: {submission_date}")
+
+            # Validate the date format
+            try:
+                print(f"[EXTRACT_SUBMISSION_DATE] Validating date format: {date_str}")
+                parsed_date = datetime.strptime(date_str, '%d%m%Y')
+                print(f"[EXTRACT_SUBMISSION_DATE] Successfully parsed date: {parsed_date}")
+
+                # Additional validation: check date is reasonable
+                current_year = datetime.now().year
+                if parsed_date.year < 2000 or parsed_date.year > current_year + 5:
+                    print(f"[EXTRACT_SUBMISSION_DATE] WARNING: Date year {parsed_date.year} is outside reasonable range (2000-{current_year + 5}), but accepting")
+
+                submission_date = date_str
+                print(f"[EXTRACT_SUBMISSION_DATE] Parsed submission_date: {submission_date}")
+            except ValueError as e:
+                print(f"[EXTRACT_SUBMISSION_DATE] ERROR: Invalid date format '{date_str}': {e}")
+                print(f"[EXTRACT_SUBMISSION_DATE] No valid date found in filename")
         else:
             print(f"[EXTRACT_SUBMISSION_DATE] No date found in filename")
 
