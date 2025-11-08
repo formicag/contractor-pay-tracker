@@ -7,7 +7,16 @@ import json
 import logging
 import os
 from datetime import datetime
+from decimal import Decimal
 from typing import Any, Dict
+
+
+class DecimalEncoder(json.JSONEncoder):
+    """JSON encoder that handles Decimal types from DynamoDB"""
+    def default(self, obj):
+        if isinstance(obj, Decimal):
+            return float(obj)
+        return super(DecimalEncoder, self).default(obj)
 
 
 class StructuredLogger:
@@ -57,7 +66,7 @@ class StructuredLogger:
         else:
             print(f"[FORMAT_LOG] No context provided, skipping context addition")
 
-        json_output = json.dumps(log_entry)
+        json_output = json.dumps(log_entry, cls=DecimalEncoder)
         print(f"[FORMAT_LOG] Converted log_entry to JSON: {json_output}")
         return json_output
 
