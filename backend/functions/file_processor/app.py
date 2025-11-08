@@ -188,6 +188,10 @@ def extract_metadata(event: dict, logger: StructuredLogger) -> dict:
     s3_key = file_metadata['S3Key']
     print(f"[FILE_PROCESSOR] Result: s3_key = {s3_key}")
 
+    print("[FILE_PROCESSOR] About to execute: get original_filename from file_metadata")
+    original_filename = file_metadata.get('OriginalFilename', s3_key.split('/')[-1])
+    print(f"[FILE_PROCESSOR] Result: original_filename = {original_filename}")
+
     print("[FILE_PROCESSOR] About to execute: tempfile.NamedTemporaryFile(delete=False, suffix='.xlsx')")
     temp_file = tempfile.NamedTemporaryFile(delete=False, suffix='.xlsx')
     print(f"[FILE_PROCESSOR] Result: temp_file = {temp_file.name}")
@@ -197,8 +201,8 @@ def extract_metadata(event: dict, logger: StructuredLogger) -> dict:
     print(f"[FILE_PROCESSOR] Result: file downloaded to {temp_file.name}")
 
     # Parse Excel file
-    print(f"[FILE_PROCESSOR] About to execute: parser = PayFileParser({temp_file.name})")
-    parser = PayFileParser(temp_file.name)
+    print(f"[FILE_PROCESSOR] About to execute: parser = PayFileParser({temp_file.name}, original_filename={original_filename})")
+    parser = PayFileParser(temp_file.name, original_filename=original_filename)
     print(f"[FILE_PROCESSOR] Result: parser created = {parser}")
 
     print("[FILE_PROCESSOR] About to execute: metadata = parser.extract_metadata()")
