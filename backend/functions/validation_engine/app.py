@@ -64,6 +64,34 @@ def lambda_handler(event, context):
 
     print("[VALIDATION_ENGINE] Entering try block")
     try:
+        # Validate required event fields
+        print("[VALIDATION_ENGINE] Validating required event fields")
+        required_fields = ['file_id', 'umbrella_id', 'period_id', 'records']
+        missing_fields = [field for field in required_fields if field not in event]
+
+        if missing_fields:
+            print(f"[VALIDATION_ENGINE] Missing required fields: {missing_fields}")
+            error_msg = f"Missing required fields in event: {', '.join(missing_fields)}"
+            logger.error("Validation engine error", error=error_msg, event_keys=list(event.keys()))
+            return {
+                'has_critical_errors': True,
+                'has_warnings': False,
+                'valid_records': [],
+                'errors': [{
+                    'error_type': 'MISSING_EVENT_FIELDS',
+                    'severity': 'CRITICAL',
+                    'error_message': error_msg,
+                    'missing_fields': missing_fields
+                }],
+                'warnings': [],
+                'validation_summary': {
+                    'total_records': 0,
+                    'valid_records': 0,
+                    'error_count': 1,
+                    'warning_count': 0
+                }
+            }
+
         print("[VALIDATION_ENGINE] Extracting file_id from event")
         print("[VALIDATION_ENGINE] About to execute: file_id = event['file_id']")
         file_id = event['file_id']
