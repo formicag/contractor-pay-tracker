@@ -478,7 +478,7 @@ resource "aws_sfn_state_machine" "contractor_pay_workflow" {
         Parameters = {
           "action"   = "extract_metadata"
           "fileId.$" = "$.fileId"
-          "bucket.$" = "$.bucket"
+          "bucket.$" = "$.s3_bucket"
           "key.$"    = "$.key"
         }
         ResultPath = "$.metadata"
@@ -608,7 +608,7 @@ resource "aws_sfn_state_machine" "contractor_pay_workflow" {
         Parameters = {
           "action"     = "parse_records"
           "fileId.$"   = "$.fileId"
-          "bucket.$"   = "$.bucket"
+          "bucket.$"   = "$.s3_bucket"
           "key.$"      = "$.key"
           "metadata.$" = "$.metadata"
         }
