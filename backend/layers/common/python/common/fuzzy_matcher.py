@@ -48,6 +48,11 @@ class FuzzyMatcher:
         """
         print(f"[FIND_BEST_MATCH] Called with search_name={search_name}, name_field={name_field}, {len(candidate_names)} candidates")
 
+        # Validate inputs
+        if not search_name or not isinstance(search_name, str):
+            print(f"[FIND_BEST_MATCH] Invalid search_name: {search_name}, returning None")
+            return None
+
         if not candidate_names:
             print(f"[FIND_BEST_MATCH] No candidate_names provided, returning None")
             return None
@@ -55,6 +60,10 @@ class FuzzyMatcher:
         print(f"[FIND_BEST_MATCH] Normalizing search_name")
         search_normalized = self.normalize_name(search_name)
         print(f"[FIND_BEST_MATCH] Normalized search_name: {search_normalized}")
+
+        if not search_normalized:
+            print(f"[FIND_BEST_MATCH] Normalized name is empty, returning None")
+            return None
 
         best_match = None
         best_score = 0
@@ -131,7 +140,20 @@ class FuzzyMatcher:
         """
         print(f"[MATCH_CONTRACTOR_NAME] Called with first_name={first_name}, last_name={last_name}, {len(contractors)} contractors")
 
-        search_name = f"{first_name} {last_name}"
+        # Validate inputs
+        if not first_name or not isinstance(first_name, str):
+            print(f"[MATCH_CONTRACTOR_NAME] Invalid first_name: {first_name}, returning None")
+            return None
+
+        if not last_name or not isinstance(last_name, str):
+            print(f"[MATCH_CONTRACTOR_NAME] Invalid last_name: {last_name}, returning None")
+            return None
+
+        first_normalized = self.normalize_name(first_name)
+        last_normalized = self.normalize_name(last_name)
+        print(f"[MATCH_CONTRACTOR_NAME] Normalized: first='{first_normalized}', last='{last_normalized}'")
+
+        search_name = f"{first_normalized} {last_normalized}"
         print(f"[MATCH_CONTRACTOR_NAME] Combined search_name: {search_name}")
 
         print(f"[MATCH_CONTRACTOR_NAME] Calling find_best_match")
@@ -148,8 +170,13 @@ class FuzzyMatcher:
         - Convert to lowercase
         - Remove extra whitespace
         - Remove special characters except spaces
+        - Handle common name variations
         """
         print(f"[NORMALIZE_NAME] Normalizing name: {name}")
+
+        if not name or not isinstance(name, str):
+            print(f"[NORMALIZE_NAME] Invalid name input: {name}, returning empty string")
+            return ""
 
         import re
         print(f"[NORMALIZE_NAME] Imported re module")
@@ -158,14 +185,20 @@ class FuzzyMatcher:
         normalized = name.lower().strip()
         print(f"[NORMALIZE_NAME] After lowercase and strip: {normalized}")
 
-        # Remove special characters except spaces
-        normalized = re.sub(r'[^a-z0-9\s]', '', normalized)
+        # Remove special characters except spaces and hyphens (for hyphenated names)
+        normalized = re.sub(r'[^a-z0-9\s-]', '', normalized)
         print(f"[NORMALIZE_NAME] After removing special chars: {normalized}")
+
+        # Replace hyphens with spaces (treat hyphenated names as separate components)
+        normalized = normalized.replace('-', ' ')
+        print(f"[NORMALIZE_NAME] After handling hyphens: {normalized}")
 
         # Collapse multiple spaces
         normalized = re.sub(r'\s+', ' ', normalized)
         print(f"[NORMALIZE_NAME] After collapsing spaces: {normalized}")
 
+        # Strip again to ensure no leading/trailing spaces
+        normalized = normalized.strip()
         print(f"[NORMALIZE_NAME] Final normalized name: {normalized}")
         return normalized
 
@@ -178,22 +211,42 @@ class FuzzyMatcher:
             name2: Second name
 
         Returns:
-            Similarity score (0-100)
+            Similarity score (0-100), or 0 if either name is invalid
         """
         print(f"[CALCULATE_SIMILARITY] Called with name1={name1}, name2={name2}")
+
+        # Validate inputs
+        if not name1 or not isinstance(name1, str):
+            print(f"[CALCULATE_SIMILARITY] Invalid name1: {name1}, returning 0")
+            return 0
+
+        if not name2 or not isinstance(name2, str):
+            print(f"[CALCULATE_SIMILARITY] Invalid name2: {name2}, returning 0")
+            return 0
 
         print(f"[CALCULATE_SIMILARITY] Normalizing name1")
         normalized1 = self.normalize_name(name1)
         print(f"[CALCULATE_SIMILARITY] normalized1={normalized1}")
 
+        if not normalized1:
+            print(f"[CALCULATE_SIMILARITY] name1 normalized to empty string, returning 0")
+            return 0
+
         print(f"[CALCULATE_SIMILARITY] Normalizing name2")
         normalized2 = self.normalize_name(name2)
         print(f"[CALCULATE_SIMILARITY] normalized2={normalized2}")
 
-        print(f"[CALCULATE_SIMILARITY] Calculating fuzz.ratio")
-        score = fuzz.ratio(normalized1, normalized2)
-        print(f"[CALCULATE_SIMILARITY] Similarity score: {score}")
+        if not normalized2:
+            print(f"[CALCULATE_SIMILARITY] name2 normalized to empty string, returning 0")
+            return 0
 
-        return score
+        print(f"[CALCULATE_SIMILARITY] Calculating fuzz.ratio")
+        try:
+            score = fuzz.ratio(normalized1, normalized2)
+            print(f"[CALCULATE_SIMILARITY] Similarity score: {score}")
+            return score
+        except Exception as e:
+            print(f"[CALCULATE_SIMILARITY] Error calculating similarity: {type(e).__name__}: {str(e)}")
+            return 0
 
 print("[FUZZY_MATCHER_MODULE] fuzzy_matcher.py module load complete")
