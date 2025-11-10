@@ -25,8 +25,8 @@ TABLE_NAME = os.environ['TABLE_NAME']
 # Logger
 logger = StructuredLogger('import-records')
 
-# DynamoDB client
-dynamodb_client = DynamoDBClient(TABLE_NAME)
+# DynamoDB client (reads TABLE_NAME from environment)
+dynamodb_client = DynamoDBClient()
 
 def lambda_handler(event, context):
     """
