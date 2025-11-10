@@ -29,9 +29,9 @@ print("[VALIDATION_ENGINE] About to execute: from common.dynamodb import DynamoD
 from common.dynamodb import DynamoDBClient
 print("[VALIDATION_ENGINE] Completed: from common.dynamodb import DynamoDBClient")
 
-print("[VALIDATION_ENGINE] About to execute: from common.validators import ValidationEngine")
-from common.validators import ValidationEngine
-print("[VALIDATION_ENGINE] Completed: from common.validators import ValidationEngine")
+print("[VALIDATION_ENGINE] About to execute: from common.validators_enterprise import EnterpriseValidationEngine")
+from common.validators_enterprise import EnterpriseValidationEngine
+print("[VALIDATION_ENGINE] Completed: from common.validators_enterprise import EnterpriseValidationEngine")
 
 
 print("[VALIDATION_ENGINE] About to execute: dynamodb_client = DynamoDBClient()")
@@ -76,7 +76,7 @@ def lambda_handler(event, context):
             return {
                 'has_critical_errors': True,
                 'has_warnings': False,
-                'valid_records': [],
+                'validated_records': [],
                 'errors': [{
                     'error_type': 'MISSING_EVENT_FIELDS',
                     'severity': 'CRITICAL',
@@ -117,11 +117,11 @@ def lambda_handler(event, context):
         logger.info("Starting validation", file_id=file_id, record_count=len(records))
         print("[VALIDATION_ENGINE] Completed: logger.info - Validation start logged")
 
-        # Initialize validation engine
-        print("[VALIDATION_ENGINE] Creating ValidationEngine instance")
-        print(f"[VALIDATION_ENGINE] About to execute: validator = ValidationEngine(dynamodb_client={dynamodb_client})")
-        validator = ValidationEngine(dynamodb_client)
-        print(f"[VALIDATION_ENGINE] Completed: ValidationEngine created: {validator}")
+        # Initialize enterprise validation engine
+        print("[VALIDATION_ENGINE] Creating EnterpriseValidationEngine instance")
+        print(f"[VALIDATION_ENGINE] About to execute: validator = EnterpriseValidationEngine(dynamodb_client={dynamodb_client})")
+        validator = EnterpriseValidationEngine(dynamodb_client)
+        print(f"[VALIDATION_ENGINE] Completed: EnterpriseValidationEngine created: {validator}")
 
         # Get period data
         print(f"[VALIDATION_ENGINE] Getting period data for period_id: {period_id}")
@@ -135,128 +135,116 @@ def lambda_handler(event, context):
         period_data = period_response.get('Item', {})
         print(f"[VALIDATION_ENGINE] Completed: Period data retrieved, has_data = {bool(period_data)}, keys = {list(period_data.keys()) if period_data else []}")
 
-        # Validate all records
+        # Validate all records with enterprise validation
         print("[VALIDATION_ENGINE] About to execute: valid_records = []")
         valid_records = []
         print(f"[VALIDATION_ENGINE] Completed: valid_records = {valid_records}")
 
-        print("[VALIDATION_ENGINE] About to execute: all_errors = []")
-        all_errors = []
-        print(f"[VALIDATION_ENGINE] Completed: all_errors = {all_errors}")
-
-        print("[VALIDATION_ENGINE] About to execute: all_warnings = []")
-        all_warnings = []
-        print(f"[VALIDATION_ENGINE] Completed: all_warnings = {all_warnings}")
+        print("[VALIDATION_ENGINE] About to execute: all_validation_checks = []")
+        all_validation_checks = []
+        print(f"[VALIDATION_ENGINE] Completed: all_validation_checks = {all_validation_checks}")
 
         print("[VALIDATION_ENGINE] About to execute: has_critical_errors = False")
         has_critical_errors = False
         print(f"[VALIDATION_ENGINE] Completed: has_critical_errors = {has_critical_errors}")
 
-        # Pre-load contractors for performance
-        print("[VALIDATION_ENGINE] About to execute: contractors_cache = _load_contractors_cache()")
-        contractors_cache = _load_contractors_cache()
-        print(f"[VALIDATION_ENGINE] Completed: contractors_cache loaded with {len(contractors_cache)} contractors")
+        print("[VALIDATION_ENGINE] About to execute: Get file_name from event")
+        file_name = event.get('file_name', 'unknown.xlsx')
+        print(f"[VALIDATION_ENGINE] Completed: file_name = {file_name}")
 
         print(f"[VALIDATION_ENGINE] About to execute: for loop over {len(records)} records")
-        for record in records:
-            print(f"[VALIDATION_ENGINE] Processing record: {record}")
+        for record_index, record in enumerate(records):
+            print(f"[VALIDATION_ENGINE] Processing record {record_index + 1}/{len(records)}: {record.get('contractor_name', 'Unknown')}")
 
-            print(f"[VALIDATION_ENGINE] About to execute: validator.validate_record for record with employee_id={record.get('employee_id')}")
-            is_valid, errors, warnings = validator.validate_record(
+            print(f"[VALIDATION_ENGINE] About to execute: validator.validate_record for record {record_index + 1}")
+            is_valid, validation_checks = validator.validate_record(
                 record,
                 umbrella_id,
                 period_data,
-                contractors_cache
+                file_name
             )
-            print(f"[VALIDATION_ENGINE] Completed: validator.validate_record - is_valid={is_valid}, errors_count={len(errors)}, warnings_count={len(warnings)}")
+            print(f"[VALIDATION_ENGINE] Completed: validator.validate_record - is_valid={is_valid}, checks_count={len(validation_checks)}")
 
-            print(f"[VALIDATION_ENGINE] About to execute: if not is_valid check (is_valid={is_valid})")
-            if not is_valid:
-                print("[VALIDATION_ENGINE] Record is NOT valid, processing errors")
+            # Separate critical failures from warnings
+            critical_failures = [c for c in validation_checks if not c.passed and c.severity == 'CRITICAL']
+            warnings = [c for c in validation_checks if not c.passed and c.severity == 'WARNING']
+            passed_checks = [c for c in validation_checks if c.passed]
+
+            print(f"[VALIDATION_ENGINE] Record {record_index + 1}: critical_failures={len(critical_failures)}, warnings={len(warnings)}, passed={len(passed_checks)}")
+
+            # Store ALL checks (passed and failed) for compliance audit trail
+            for check in validation_checks:
+                check_dict = check.to_dict()
+                check_dict['record_index'] = record_index
+                check_dict['contractor_name'] = record.get('contractor_name', 'Unknown')
+                check_dict['employee_id'] = record.get('employee_id', '')
+                all_validation_checks.append(check_dict)
+
+            print(f"[VALIDATION_ENGINE] About to execute: if critical_failures check (count={len(critical_failures)})")
+            if len(critical_failures) > 0:
+                print(f"[VALIDATION_ENGINE] Record {record_index + 1} has CRITICAL failures - REJECTING import")
 
                 print(f"[VALIDATION_ENGINE] About to execute: has_critical_errors = True")
                 has_critical_errors = True
                 print(f"[VALIDATION_ENGINE] Completed: has_critical_errors = {has_critical_errors}")
 
-                print(f"[VALIDATION_ENGINE] About to execute: all_errors.extend(errors) - adding {len(errors)} errors")
-                all_errors.extend(errors)
-                print(f"[VALIDATION_ENGINE] Completed: all_errors.extend - total errors now = {len(all_errors)}")
-
-                # Store errors in DynamoDB
-                print(f"[VALIDATION_ENGINE] About to execute: _store_validation_errors(file_id={file_id}, errors={len(errors)}, logger)")
-                _store_validation_errors(file_id, errors, logger)
-                print("[VALIDATION_ENGINE] Completed: _store_validation_errors")
+                # DO NOT add to valid_records - record is rejected
+                print(f"[VALIDATION_ENGINE] Record {record_index + 1} NOT added to valid_records (critical failures)")
             else:
-                print("[VALIDATION_ENGINE] Record IS valid, processing contractor info")
+                print(f"[VALIDATION_ENGINE] Record {record_index + 1} has no CRITICAL failures - ACCEPTING import (may have warnings)")
 
-                # Add contractor/association info to record
-                print(f"[VALIDATION_ENGINE] About to execute: validator.find_contractor(record={record.get('employee_id')}, contractors_cache)")
-                contractor_result = validator.find_contractor(record, contractors_cache)
-                print(f"[VALIDATION_ENGINE] Completed: validator.find_contractor - result keys = {list(contractor_result.keys())}")
-
-                print(f"[VALIDATION_ENGINE] About to execute: contractor_id = contractor_result.get('contractor_id')")
-                contractor_id = contractor_result.get('contractor_id')
-                print(f"[VALIDATION_ENGINE] Completed: contractor_id = {contractor_id}")
-
-                print(f"[VALIDATION_ENGINE] About to execute: validator.validate_umbrella_association(contractor_id={contractor_id}, umbrella_id={umbrella_id})")
-                assoc_result = validator.validate_umbrella_association(
-                    contractor_id,
-                    umbrella_id,
-                    period_data
-                )
-                print(f"[VALIDATION_ENGINE] Completed: validator.validate_umbrella_association - result keys = {list(assoc_result.keys())}")
-
-                print(f"[VALIDATION_ENGINE] About to execute: association_id = assoc_result.get('association', {{}}).get('AssociationID')")
-                association_id = assoc_result.get('association', {}).get('AssociationID')
-                print(f"[VALIDATION_ENGINE] Completed: association_id = {association_id}")
-
-                print(f"[VALIDATION_ENGINE] About to execute: valid_records.append - creating record dict")
+                # Add record to valid records even if it has warnings
+                # Warnings are informational only and don't block import
+                print(f"[VALIDATION_ENGINE] About to execute: valid_records.append for record {record_index + 1}")
                 valid_records.append({
                     'record': record,
-                    'contractor_id': contractor_id,
-                    'association_id': association_id,
+                    'contractor_id': record.get('contractor_id', ''),
                     'umbrella_id': umbrella_id,
-                    'period_id': period_id
+                    'period_id': period_id,
+                    'warnings': [w.to_dict() for w in warnings] if warnings else []
                 })
                 print(f"[VALIDATION_ENGINE] Completed: valid_records.append - total valid records = {len(valid_records)}")
 
-            print(f"[VALIDATION_ENGINE] About to execute: if warnings check (warnings_count={len(warnings)})")
-            if warnings:
-                print(f"[VALIDATION_ENGINE] Warnings found, processing {len(warnings)} warnings")
-
-                print(f"[VALIDATION_ENGINE] About to execute: all_warnings.extend(warnings) - adding {len(warnings)} warnings")
-                all_warnings.extend(warnings)
-                print(f"[VALIDATION_ENGINE] Completed: all_warnings.extend - total warnings now = {len(all_warnings)}")
-
-                print(f"[VALIDATION_ENGINE] About to execute: _store_validation_warnings(file_id={file_id}, warnings={len(warnings)}, logger)")
-                _store_validation_warnings(file_id, warnings, logger)
-                print("[VALIDATION_ENGINE] Completed: _store_validation_warnings")
-
         print(f"[VALIDATION_ENGINE] Completed: for loop over all {len(records)} records")
+
+        # Count total errors and warnings from all checks
+        total_critical_failures = sum(1 for c in all_validation_checks if not c.get('passed') and c.get('severity') == 'CRITICAL')
+        total_warnings = sum(1 for c in all_validation_checks if not c.get('passed') and c.get('severity') == 'WARNING')
+        total_passed = sum(1 for c in all_validation_checks if c.get('passed'))
 
         print(f"[VALIDATION_ENGINE] About to execute: logger.info('Validation complete') with stats")
         logger.info("Validation complete",
                    total_records=len(records),
                    valid_records=len(valid_records),
-                   errors=len(all_errors),
-                   warnings=len(all_warnings))
+                   total_checks=len(all_validation_checks),
+                   passed_checks=total_passed,
+                   critical_failures=total_critical_failures,
+                   warnings=total_warnings)
         print("[VALIDATION_ENGINE] Completed: logger.info - Validation complete logged")
 
-        print("[VALIDATION_ENGINE] About to execute: return validation results dictionary")
+        print("[VALIDATION_ENGINE] About to execute: return validation results dictionary with ALL validation checks")
         result = {
-            'hasCriticalErrors': has_critical_errors,
-            'hasWarnings': len(all_warnings) > 0,
-            'validatedRecords': valid_records,
-            'errors': all_errors,
-            'warnings': all_warnings,
-            'validationSummary': {
-                'totalRecords': len(records),
-                'validRecords': len(valid_records),
-                'errorCount': len(all_errors),
-                'warningCount': len(all_warnings)
+            'has_critical_errors': has_critical_errors,
+            'has_warnings': total_warnings > 0,
+            'validated_records': valid_records,
+            'all_validation_checks': all_validation_checks,  # FULL AUDIT TRAIL
+            'validation_summary': {
+                'total_records': len(records),
+                'valid_records': len(valid_records),
+                'rejected_records': len(records) - len(valid_records),
+                'total_checks': len(all_validation_checks),
+                'passed_checks': total_passed,
+                'critical_failures': total_critical_failures,
+                'warnings': total_warnings
             }
         }
-        print(f"[VALIDATION_ENGINE] Completed: return dict created - has_critical_errors={has_critical_errors}, valid_records={len(valid_records)}, errors={len(all_errors)}, warnings={len(all_warnings)}")
+        print(f"[VALIDATION_ENGINE] Completed: return dict created - has_critical_errors={has_critical_errors}, valid_records={len(valid_records)}, total_checks={len(all_validation_checks)}")
+
+        # Store validation snapshot with ALL checks for compliance
+        print("[VALIDATION_ENGINE] About to execute: _store_validation_snapshot with all checks")
+        _store_validation_snapshot(file_id, umbrella_id, period_data, result, logger)
+        print("[VALIDATION_ENGINE] Completed: _store_validation_snapshot")
+
         return result
 
     except Exception as e:
@@ -417,5 +405,129 @@ def _store_validation_warnings(file_id: str, warnings: list, logger: StructuredL
     print(f"[VALIDATION_ENGINE] About to execute: logger.info('Stored validation warnings', count={len(items)})")
     logger.info("Stored validation warnings", count=len(items))
     print("[VALIDATION_ENGINE] Completed: logger.info - stored warnings logged")
+
+
+def _build_rates_cache(records, contractors_cache):
+    """Build cache of normal rates from current batch for overtime validation"""
+    print("[VALIDATION_ENGINE] _build_rates_cache() called")
+
+    rates_cache = {}
+
+    for record in records:
+        if record.get('record_type') != 'NORMAL':
+            continue
+
+        employee_id = record.get('employee_id')
+        day_rate = record.get('day_rate')
+
+        if not employee_id or not day_rate:
+            continue
+
+        # Find contractor by employee_id
+        for contractor_id, contractor in contractors_cache.items():
+            if contractor.get('EmployeeID') == employee_id:
+                rates_cache[contractor_id] = day_rate
+                print(f"[VALIDATION_ENGINE] Added rate {day_rate} for contractor {contractor_id}")
+                break
+
+    print(f"[VALIDATION_ENGINE] _build_rates_cache() returning {len(rates_cache)} rates")
+    return rates_cache
+
+
+def _store_validation_snapshot(
+    file_id: str,
+    umbrella_id: str,
+    period_data: dict,
+    validation_results: dict,
+    logger: StructuredLogger
+):
+    """
+    Store a complete validation snapshot in DynamoDB
+
+    Args:
+        file_id: File ID being validated
+        validation_results: Complete validation results from lambda_handler
+        event: Original event data (for metadata)
+        logger: Logger instance
+    """
+    print(f"[VALIDATION_ENGINE] _store_validation_snapshot() called with file_id={file_id}")
+
+    # Extract metadata
+    period_id = period_data.get('PeriodID', 'UNKNOWN')
+    period_name = period_data.get('PeriodName', 'UNKNOWN')
+
+    # Get file metadata
+    print(f"[VALIDATION_ENGINE] Fetching file metadata for file_id={file_id}")
+    file_metadata = dynamodb_client.get_file_metadata(file_id)
+    file_name = file_metadata.get('OriginalFilename', 'UNKNOWN') if file_metadata else 'UNKNOWN'
+
+    # Extract summary and ALL validation checks
+    has_critical_errors = validation_results.get('has_critical_errors', False)
+    status = 'FAILED' if has_critical_errors else 'PASSED'
+
+    validation_summary = validation_results.get('validation_summary', {})
+    all_checks = validation_results.get('all_validation_checks', [])
+
+    # Create timestamp
+    validated_at = datetime.utcnow().isoformat() + 'Z'
+
+    # Create enterprise validation snapshot with ALL checks for audit trail
+    snapshot_item = {
+        'PK': f'FILE#{file_id}',
+        'SK': f'VALIDATION#{validated_at}',
+        'EntityType': 'ValidationSnapshot',
+        'FileID': file_id,
+        'ValidatedAt': validated_at,
+        'Status': status,
+        'TotalRecords': validation_summary.get('total_records', 0),
+        'ValidRecords': validation_summary.get('valid_records', 0),
+        'RejectedRecords': validation_summary.get('rejected_records', 0),
+        'TotalChecks': validation_summary.get('total_checks', 0),
+        'PassedChecks': validation_summary.get('passed_checks', 0),
+        'CriticalFailures': validation_summary.get('critical_failures', 0),
+        'Warnings': validation_summary.get('warnings', 0),
+        'AllValidationChecks': all_checks,  # FULL AUDIT TRAIL - EVERY CHECK
+        'UmbrellaID': umbrella_id,
+        'PeriodID': period_id,
+        'PeriodName': period_name,
+        'FileName': file_name,
+        'GSI1PK': 'VALIDATIONS',
+        'GSI1SK': validated_at
+    }
+
+    print(f"[VALIDATION_ENGINE] Created snapshot with {len(all_checks)} total checks (Status={status})")
+
+    # Convert any float values to Decimal for DynamoDB
+    from decimal import Decimal
+
+    def convert_floats_to_decimal(obj):
+        """Recursively convert floats to Decimal for DynamoDB compatibility"""
+        if isinstance(obj, dict):
+            return {k: convert_floats_to_decimal(v) for k, v in obj.items()}
+        elif isinstance(obj, list):
+            return [convert_floats_to_decimal(item) for item in obj]
+        elif isinstance(obj, float):
+            return Decimal(str(obj))
+        else:
+            return obj
+
+    snapshot_item = convert_floats_to_decimal(snapshot_item)
+
+    # Store in DynamoDB
+    print(f"[VALIDATION_ENGINE] Storing validation snapshot in DynamoDB")
+    dynamodb_client.table.put_item(Item=snapshot_item)
+
+    logger.info(
+        "Stored validation snapshot",
+        file_id=file_id,
+        status=status,
+        total_rules=len(validation_rules),
+        passed_rules=snapshot_item['PassedRules'],
+        failed_rules=snapshot_item['FailedRules']
+    )
+
+    print(f"[VALIDATION_ENGINE] Validation snapshot stored successfully")
+    return snapshot_item
+
 
 print("[VALIDATION_ENGINE] Module load complete")

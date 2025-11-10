@@ -1,0 +1,394 @@
+{% extends "base.html" %}
+
+{% block title %}Umbrella Dashboard - {{ app_name }}{% endblock %}
+
+{% block extra_css %}
+<style>
+    /* Umbrella Tiles Grid */
+    .umbrella-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(800px, 1fr));
+        gap: 1.5rem;
+        margin-bottom: 2rem;
+    }
+
+    /* Umbrella Tile Card */
+    .umbrella-tile {
+        background: var(--bg-secondary);
+        border-radius: 0.5rem;
+        border: 1px solid var(--border);
+        padding: 1.5rem;
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+        transition: all 0.2s ease;
+    }
+
+    .umbrella-tile:hover {
+        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.4);
+        border-color: var(--accent);
+    }
+
+    /* Umbrella Header */
+    .umbrella-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 1rem;
+        padding-bottom: 1rem;
+        border-bottom: 1px solid var(--border);
+    }
+
+    .umbrella-name {
+        font-size: 1.5rem;
+        font-weight: 700;
+        color: var(--text-primary);
+    }
+
+    .umbrella-code {
+        font-size: 0.875rem;
+        color: var(--text-muted);
+        font-weight: 500;
+        background: var(--bg-tertiary);
+        padding: 0.25rem 0.75rem;
+        border-radius: 0.25rem;
+    }
+
+    .resource-count {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        font-size: 0.875rem;
+        color: var(--text-secondary);
+        margin-bottom: 1rem;
+    }
+
+    .resource-count .count {
+        font-weight: 700;
+        color: var(--accent);
+        font-size: 1rem;
+    }
+
+    /* Monthly Timeline */
+    .monthly-timeline {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(80px, 1fr));
+        gap: 0.5rem;
+    }
+
+    .month-block {
+        background: var(--bg-tertiary);
+        border-radius: 0.375rem;
+        padding: 0.75rem;
+        text-align: center;
+        border: 1px solid var(--border);
+        transition: all 0.2s ease;
+    }
+
+    .month-block:hover {
+        background: var(--bg-primary);
+        border-color: var(--accent);
+    }
+
+    .month-label {
+        font-size: 0.75rem;
+        font-weight: 600;
+        color: var(--text-muted);
+        text-transform: uppercase;
+        margin-bottom: 0.25rem;
+        letter-spacing: 0.05em;
+    }
+
+    .month-amount {
+        font-size: 0.875rem;
+        font-weight: 700;
+        color: var(--text-primary);
+    }
+
+    .month-amount.has-data {
+        color: var(--success);
+    }
+
+    .month-amount.no-data {
+        color: var(--text-muted);
+        opacity: 0.5;
+    }
+
+    /* Summary Section */
+    .summary-section {
+        margin-top: 1rem;
+        padding-top: 1rem;
+        border-top: 1px solid var(--border);
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+    }
+
+    .total-paid {
+        font-size: 0.875rem;
+        color: var(--text-secondary);
+    }
+
+    .total-paid .amount {
+        font-size: 1.25rem;
+        font-weight: 700;
+        color: var(--success);
+        margin-left: 0.5rem;
+    }
+
+    /* Empty State */
+    .empty-state {
+        text-align: center;
+        padding: 4rem 2rem;
+        background: var(--bg-secondary);
+        border-radius: 0.5rem;
+        border: 1px solid var(--border);
+    }
+
+    .empty-icon {
+        font-size: 4rem;
+        margin-bottom: 1rem;
+        opacity: 0.5;
+    }
+
+    .empty-state h3 {
+        font-size: 1.25rem;
+        font-weight: 600;
+        color: var(--text-primary);
+        margin-bottom: 0.5rem;
+    }
+
+    .empty-state p {
+        color: var(--text-secondary);
+    }
+
+    /* Loading State */
+    .loading-overlay {
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background: rgba(15, 20, 25, 0.8);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        z-index: 9999;
+    }
+
+    .loading-content {
+        text-align: center;
+        color: var(--text-primary);
+    }
+
+    /* Responsive */
+    @media (max-width: 768px) {
+        .umbrella-grid {
+            grid-template-columns: 1fr;
+        }
+
+        .monthly-timeline {
+            grid-template-columns: repeat(3, 1fr);
+        }
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+    <h2>Umbrella Company Dashboard</h2>
+    <button class="btn" onclick="loadUmbrellaStats()">↻ Refresh</button>
+</div>
+
+<!-- Summary Subtitle -->
+<div id="summary-subtitle" style="color: var(--text-secondary); font-size: 1rem; margin-bottom: 1rem; display: none;">
+    <strong style="color: var(--accent);" id="summary-files">0</strong> pay files from <strong style="color: var(--accent);" id="summary-umbrellas">0</strong> umbrella companies over past <strong style="color: var(--accent);" id="summary-months">0</strong> months for <strong style="color: var(--accent);" id="summary-contractors">0</strong> contractors
+</div>
+
+<!-- Billing Summary -->
+<div id="billing-summary" style="background: var(--bg-secondary); border-left: 3px solid var(--accent); padding: 0.75rem 1rem; border-radius: 0.5rem; margin-bottom: 2rem; display: none;">
+    <p style="margin: 0; color: var(--text-secondary); font-size: 0.95rem;">
+        <strong style="color: var(--text-primary);">Billing Summary:</strong>
+        <span id="billing-text">Loading...</span>
+    </p>
+</div>
+
+<!-- Loading Overlay -->
+<div id="loading-overlay" class="loading-overlay" style="display: none;">
+    <div class="loading-content">
+        <div class="spinner"></div>
+        <p style="margin-top: 1rem;">Loading umbrella company data...</p>
+    </div>
+</div>
+
+<!-- Umbrellas Container -->
+<div id="umbrellas-container">
+    <div class="spinner"></div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    // Month ordering for consistent display
+    const MONTH_ORDER = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+    // Load data on page load
+    window.addEventListener('DOMContentLoaded', () => {
+        loadUmbrellaStats();
+    });
+
+    async function loadUmbrellaStats() {
+        const container = document.getElementById('umbrellas-container');
+        const overlay = document.getElementById('loading-overlay');
+
+        overlay.style.display = 'flex';
+        container.innerHTML = '<div class="spinner"></div>';
+
+        try {
+            const response = await fetch('/api/umbrella-stats');
+            const data = await response.json();
+
+            if (data.error) {
+                container.innerHTML = '<div class="alert alert-danger">Failed to load umbrella data: ' + (data.message || data.error) + '</div>';
+                overlay.style.display = 'none';
+                return;
+            }
+
+            const umbrellas = data.umbrellas || [];
+            const months = data.months || [];
+            const summary = data.summary || {};
+
+            // Update summary subtitle
+            if (summary.total_files !== undefined) {
+                document.getElementById('summary-files').textContent = summary.total_files;
+                document.getElementById('summary-umbrellas').textContent = summary.total_umbrellas;
+                document.getElementById('summary-months').textContent = summary.total_months;
+                document.getElementById('summary-contractors').textContent = summary.total_contractors;
+                document.getElementById('summary-subtitle').style.display = 'block';
+            }
+
+            if (umbrellas.length === 0) {
+                container.innerHTML = `
+                    <div class="empty-state">
+                        <div class="empty-icon">🏢</div>
+                        <h3>No umbrella company data found</h3>
+                        <p>Upload pay files to see umbrella company statistics</p>
+                    </div>
+                `;
+                overlay.style.display = 'none';
+                return;
+            }
+
+            displayUmbrellaTiles(umbrellas, months);
+            overlay.style.display = 'none';
+
+        } catch (error) {
+            container.innerHTML = '<div class="alert alert-danger">Failed to load umbrella data: ' + error.message + '</div>';
+            overlay.style.display = 'none';
+        }
+    }
+
+    function displayUmbrellaTiles(umbrellas, months) {
+        const container = document.getElementById('umbrellas-container');
+
+        // Sort months by calendar order
+        const sortedMonths = sortMonths(months);
+
+        // Calculate billing summary
+        let totalBillingPeriods = 0;
+        umbrellas.forEach(umbrella => {
+            const monthlyTotals = umbrella.monthly_totals || {};
+            Object.values(monthlyTotals).forEach(amount => {
+                if (amount > 0) {
+                    totalBillingPeriods++;
+                }
+            });
+        });
+
+        // Update billing summary
+        const billingText = `Billed <strong style="color: var(--accent);">${umbrellas.length}</strong> umbrella ${umbrellas.length === 1 ? 'company' : 'companies'} for <strong style="color: var(--accent);">${sortedMonths.length}</strong> ${sortedMonths.length === 1 ? 'month' : 'months'} (<strong style="color: var(--accent);">${totalBillingPeriods}</strong> billing ${totalBillingPeriods === 1 ? 'period' : 'periods'})`;
+        document.getElementById('billing-text').innerHTML = billingText;
+        document.getElementById('billing-summary').style.display = 'block';
+
+        let html = '<div class="umbrella-grid">';
+
+        umbrellas.forEach(umbrella => {
+            const monthlyTotals = umbrella.monthly_totals || {};
+
+            html += `
+                <div class="umbrella-tile">
+                    <div class="umbrella-header">
+                        <div>
+                            <div class="umbrella-name">${umbrella.name}</div>
+                            <div class="umbrella-code">${umbrella.code}</div>
+                        </div>
+                    </div>
+
+                    <div class="resource-count">
+                        <span>Resources:</span>
+                        <span class="count">${umbrella.contractor_count}</span>
+                        <span>${umbrella.contractor_count === 1 ? 'contractor' : 'contractors'}</span>
+                    </div>
+
+                    <div class="monthly-timeline">
+            `;
+
+            // Display each month
+            sortedMonths.forEach(month => {
+                const amount = monthlyTotals[month] || 0;
+                const hasData = amount > 0;
+                const formattedAmount = hasData ? formatCurrency(amount) : '-';
+                const amountClass = hasData ? 'has-data' : 'no-data';
+
+                html += `
+                    <div class="month-block">
+                        <div class="month-label">${month}</div>
+                        <div class="month-amount ${amountClass}">${formattedAmount}</div>
+                    </div>
+                `;
+            });
+
+            html += `
+                    </div>
+
+                    <div class="summary-section">
+                        <div class="total-paid">
+                            Total Paid:<span class="amount">${formatCurrency(umbrella.total_paid)}</span>
+                        </div>
+                    </div>
+                </div>
+            `;
+        });
+
+        html += '</div>';
+
+        container.innerHTML = html;
+    }
+
+    function sortMonths(months) {
+        // Sort months by their position in MONTH_ORDER
+        return months.sort((a, b) => {
+            const indexA = MONTH_ORDER.indexOf(a);
+            const indexB = MONTH_ORDER.indexOf(b);
+
+            // If month not found in standard order, put it at the end
+            if (indexA === -1) return 1;
+            if (indexB === -1) return -1;
+
+            return indexA - indexB;
+        });
+    }
+
+    function formatCurrency(amount) {
+        if (amount === 0) return '-';
+
+        // Format with thousand separators and 2 decimal places
+        const formatted = new Intl.NumberFormat('en-GB', {
+            style: 'currency',
+            currency: 'GBP',
+            minimumFractionDigits: 0,
+            maximumFractionDigits: 0
+        }).format(amount);
+
+        return formatted;
+    }
+</script>
+{% endblock %}
