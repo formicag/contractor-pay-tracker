@@ -98,20 +98,22 @@ resource "aws_dynamodb_table" "contractor_pay" {
   stream_enabled   = true
   stream_view_type = "NEW_AND_OLD_IMAGES"
 
-  tags = {
-    Environment = var.environment
-    Application = "contractor-pay-tracker"
-  }
+  tags = merge(local.common_tags, {
+    Name        = "contractor-pay-${var.environment}"
+    Service     = "dynamodb"
+    Description = "Primary database for contractor pay tracking"
+  })
 }
 
 # S3 Bucket
 resource "aws_s3_bucket" "pay_files" {
   bucket = "contractor-pay-files-${var.environment}-${data.aws_caller_identity.current.account_id}"
 
-  tags = {
-    Environment = var.environment
-    Application = "contractor-pay-tracker"
-  }
+  tags = merge(local.common_tags, {
+    Name        = "contractor-pay-files-${var.environment}"
+    Service     = "s3"
+    Description = "Storage for contractor pay Excel files and reports"
+  })
 }
 
 resource "aws_s3_bucket_versioning" "pay_files" {
@@ -201,6 +203,12 @@ resource "aws_iam_role" "lambda_role" {
       }
     }]
   })
+
+  tags = merge(local.common_tags, {
+    Name        = "contractor-pay-lambda-${var.environment}"
+    Service     = "iam"
+    Description = "Execution role for Lambda functions"
+  })
 }
 
 resource "aws_iam_role_policy_attachment" "lambda_basic" {
@@ -234,6 +242,16 @@ resource "aws_iam_role_policy" "lambda_policy" {
           aws_s3_bucket.pay_files.arn,
           "${aws_s3_bucket.pay_files.arn}/*"
         ]
+      },
+      {
+        Effect = "Allow"
+        Action = [
+          "bedrock:InvokeModel"
+        ]
+        Resource = [
+          "arn:aws:bedrock:${var.aws_region}::foundation-model/amazon.titan-embed-text-v2:0",
+          "arn:aws:bedrock:${var.aws_region}::foundation-model/amazon.titan-embed-text-v1"
+        ]
       }
     ]
   })
@@ -262,6 +280,13 @@ resource "aws_lambda_function" "file_upload_handler" {
       LOG_LEVEL         = var.log_level
     }
   }
+
+  tags = merge(local.common_tags, {
+    Name        = "contractor-pay-file-upload-handler-${var.environment}"
+    Service     = "lambda"
+    Function    = "file-upload-handler"
+    Description = "Handles S3 file upload events and initiates processing"
+  })
 }
 
 # File Processor Lambda
@@ -286,6 +311,13 @@ resource "aws_lambda_function" "file_processor" {
       LOG_LEVEL      = var.log_level
     }
   }
+
+  tags = merge(local.common_tags, {
+    Name        = "contractor-pay-file-processor-${var.environment}"
+    Service     = "lambda"
+    Function    = "file-processor"
+    Description = "Processes Excel files and extracts contractor pay data"
+  })
 }
 
 # Validation Engine Lambda
@@ -309,6 +341,13 @@ resource "aws_lambda_function" "validation_engine" {
       LOG_LEVEL   = var.log_level
     }
   }
+
+  tags = merge(local.common_tags, {
+    Name        = "contractor-pay-validation-engine-${var.environment}"
+    Service     = "lambda"
+    Function    = "validation-engine"
+    Description = "Validates contractor pay records against business rules"
+  })
 }
 
 # Cleanup Handler Lambda
@@ -334,6 +373,13 @@ resource "aws_lambda_function" "cleanup_handler" {
       RETENTION_DAYS = "30"
     }
   }
+
+  tags = merge(local.common_tags, {
+    Name        = "contractor-pay-cleanup-handler-${var.environment}"
+    Service     = "lambda"
+    Function    = "cleanup-handler"
+    Description = "Manages data retention and cleanup of old records"
+  })
 }
 
 # Report Generator Lambda
@@ -358,6 +404,13 @@ resource "aws_lambda_function" "report_generator" {
       LOG_LEVEL      = var.log_level
     }
   }
+
+  tags = merge(local.common_tags, {
+    Name        = "contractor-pay-report-generator-${var.environment}"
+    Service     = "lambda"
+    Function    = "report-generator"
+    Description = "Generates contractor pay reports and summaries"
+  })
 }
 
 # S3 Trigger Permission
@@ -404,10 +457,11 @@ resource "aws_iam_role" "step_functions_role" {
     }]
   })
 
-  tags = {
-    Environment = var.environment
-    Application = "contractor-pay-tracker"
-  }
+  tags = merge(local.common_tags, {
+    Name        = "contractor-pay-step-functions-${var.environment}"
+    Service     = "iam"
+    Description = "Execution role for Step Functions workflow"
+  })
 }
 
 # IAM Policy for Step Functions to invoke Lambda
@@ -450,10 +504,11 @@ resource "aws_cloudwatch_log_group" "step_functions" {
   name              = "/aws/vendedlogs/states/contractor-pay-workflow-${var.environment}"
   retention_in_days = 30
 
-  tags = {
-    Environment = var.environment
-    Application = "contractor-pay-tracker"
-  }
+  tags = merge(local.common_tags, {
+    Name        = "contractor-pay-workflow-logs-${var.environment}"
+    Service     = "cloudwatch"
+    Description = "Step Functions workflow execution logs"
+  })
 }
 
 # Step Functions State Machine
@@ -638,8 +693,17 @@ resource "aws_sfn_state_machine" "contractor_pay_workflow" {
         Type     = "Task"
         Resource = aws_lambda_function.validation_engine.arn
         Parameters = {
-          "fileId.$"  = "$.fileId"
-          "records.$" = "$.parsedRecords.records"
+          "file_id.$"     = "$.fileId"
+          "umbrella_id.$" = "$.period.umbrella_id"
+          "period_id.$"   = "$.period.period_id"
+          "records.$"     = "$.parsedRecords.records"
+        }
+        ResultSelector = {
+          "hasCriticalErrors.$" = "$.has_critical_errors"
+          "hasWarnings.$"       = "$.has_warnings"
+          "validatedRecords.$"  = "$.validated_records"
+          "errors.$"            = "$.errors"
+          "warnings.$"          = "$.warnings"
         }
         ResultPath = "$.validation"
         Next       = "HasCriticalErrors"
@@ -784,10 +848,11 @@ resource "aws_sfn_state_machine" "contractor_pay_workflow" {
     }
   })
 
-  tags = {
-    Environment = var.environment
-    Application = "contractor-pay-tracker"
-  }
+  tags = merge(local.common_tags, {
+    Name        = "contractor-pay-workflow-${var.environment}"
+    Service     = "step-functions"
+    Description = "Orchestrates contractor pay file processing workflow"
+  })
 
   depends_on = [
     aws_iam_role_policy.step_functions_policy,
