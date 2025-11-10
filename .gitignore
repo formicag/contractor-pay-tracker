@@ -84,3 +84,8 @@ credentials
 
 # Test outputs
 response.json
+
+# Terraform
+*.tfplan
+tfplan_*
+*.zip

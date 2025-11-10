@@ -147,36 +147,6 @@ def seed_umbrella_companies(conn):
         cursor.close()
 
 
-def seed_permanent_staff(conn):
-    """Insert 4 permanent staff members (to reject in validation)"""
-    print("\n" + "="*80)
-    print("STEP 4: Seeding permanent staff (validation blacklist)...")
-    print("="*80)
-
-    staff = [
-        ('Syed', 'Syed', 'syed syed'),
-        ('Victor', 'Cheung', 'victor cheung'),
-        ('Gareth', 'Jones', 'gareth jones'),
-        ('Martin', 'Alabone', 'martin alabone'),
-    ]
-
-    cursor = conn.cursor()
-    try:
-        execute_values(cursor, """
-            INSERT INTO permanent_staff (first_name, last_name, normalized_name)
-            VALUES %s
-        """, staff)
-        conn.commit()
-        print(f"✓ Inserted {len(staff)} permanent staff members")
-        print("  → These names will trigger CRITICAL errors if found in pay files")
-    except Exception as e:
-        conn.rollback()
-        print(f"✗ Error seeding permanent staff: {e}")
-        raise
-    finally:
-        cursor.close()
-
-
 def seed_pay_periods(conn):
     """Insert 13 pay periods for 2025-2026"""
     print("\n" + "="*80)
@@ -387,7 +357,6 @@ def verify_seed_data(conn):
     checks = [
         ("System parameters", "SELECT COUNT(*) FROM system_parameters", 6),
         ("Umbrella companies", "SELECT COUNT(*) FROM umbrella_companies", 6),
-        ("Permanent staff", "SELECT COUNT(*) FROM permanent_staff", 4),
         ("Pay periods", "SELECT COUNT(*) FROM pay_periods", 13),
         ("Contractors", "SELECT COUNT(*) FROM contractors", 23),
         ("Contractor associations", "SELECT COUNT(*) FROM contractor_umbrella_associations", 25),  # 23 + 2 extra for Donna Smith
@@ -465,7 +434,6 @@ def main():
         run_schema(conn)
         seed_system_parameters(conn)
         umbrella_map = seed_umbrella_companies(conn)
-        seed_permanent_staff(conn)
         period_map = seed_pay_periods(conn)
         contractor_map = seed_contractors(conn)
         seed_contractor_umbrella_associations(conn, contractor_map, umbrella_map)

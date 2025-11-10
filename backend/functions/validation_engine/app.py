@@ -240,10 +240,15 @@ def lambda_handler(event, context):
         }
         print(f"[VALIDATION_ENGINE] Completed: return dict created - has_critical_errors={has_critical_errors}, valid_records={len(valid_records)}, total_checks={len(all_validation_checks)}")
 
-        # Store validation snapshot with ALL checks for compliance
-        print("[VALIDATION_ENGINE] About to execute: _store_validation_snapshot with all checks")
-        _store_validation_snapshot(file_id, umbrella_id, period_data, result, logger)
-        print("[VALIDATION_ENGINE] Completed: _store_validation_snapshot")
+        # Store granular validation traces (EACH check as separate item)
+        print("[VALIDATION_ENGINE] About to execute: _store_validation_traces with all checks")
+        _store_validation_traces(file_id, umbrella_id, period_data, all_validation_checks, file_name, logger)
+        print("[VALIDATION_ENGINE] Completed: _store_validation_traces")
+
+        # Store validation summary for quick access
+        print("[VALIDATION_ENGINE] About to execute: _store_validation_summary")
+        _store_validation_summary(file_id, umbrella_id, period_data, result, logger)
+        print("[VALIDATION_ENGINE] Completed: _store_validation_summary")
 
         return result
 
@@ -434,7 +439,132 @@ def _build_rates_cache(records, contractors_cache):
     return rates_cache
 
 
-def _store_validation_snapshot(
+def _store_validation_traces(
+    file_id: str,
+    umbrella_id: str,
+    period_data: dict,
+    all_validation_checks: list,
+    file_name: str,
+    logger: StructuredLogger
+):
+    """
+    Store each validation check as a separate DynamoDB item for granular tracing.
+
+    This provides:
+    - Line-by-line audit trail
+    - Efficient cascade delete
+    - Foundation for semantic search
+    - No 400KB item size limit
+
+    Args:
+        file_id: File ID being validated
+        umbrella_id: Umbrella company ID
+        period_data: Period information
+        all_validation_checks: List of all validation checks (passed and failed)
+        file_name: Original filename
+        logger: Logger instance
+    """
+    print(f"[VALIDATION_ENGINE] _store_validation_traces() called with file_id={file_id}, checks_count={len(all_validation_checks)}")
+
+    if not all_validation_checks:
+        print("[VALIDATION_ENGINE] No validation checks to store")
+        return
+
+    # Extract metadata
+    period_id = period_data.get('PeriodID', 'UNKNOWN')
+    timestamp = datetime.utcnow().isoformat() + 'Z'
+
+    # Build trace items
+    trace_items = []
+    for check in all_validation_checks:
+        # Calculate Excel line number (record_index + 2 for header row + 0-indexed)
+        line_number = check.get('record_index', 0) + 2
+
+        trace_item = {
+            'PK': f'FILE#{file_id}',
+            'SK': f"VALIDATION_TRACE#{check['check_id']}#{timestamp}",
+            'EntityType': 'ValidationTrace',
+
+            # Core Check Identity
+            'FileID': file_id,
+            'CheckID': check['check_id'],
+            'CheckName': check['check_name'],
+            'CheckType': check['check_type'],
+            'Severity': check['severity'],
+            'Timestamp': timestamp,
+
+            # Validation Result
+            'Passed': check['passed'],
+            'Expected': check.get('expected'),
+            'Actual': check.get('actual'),
+            'Message': check['message'],
+
+            # Record Context
+            'RecordIndex': check.get('record_index'),
+            'ContractorName': check.get('contractor_name'),
+            'EmployeeID': check.get('employee_id'),
+            'LineNumber': line_number,
+
+            # File Context
+            'FileName': file_name,
+            'UmbrellaID': umbrella_id,
+            'PeriodID': period_id,
+
+            # Additional Metadata
+            'Metadata': check.get('metadata', {}),
+
+            # GSI for querying all traces across files
+            'GSI1PK': 'VALIDATION_TRACES',
+            'GSI1SK': f'{timestamp}#FILE#{file_id}'
+        }
+
+        trace_items.append(trace_item)
+
+    print(f"[VALIDATION_ENGINE] Built {len(trace_items)} trace items")
+
+    # Convert floats to Decimal for DynamoDB compatibility
+    from decimal import Decimal
+
+    def convert_floats_to_decimal(obj):
+        """Recursively convert floats to Decimal for DynamoDB compatibility"""
+        if isinstance(obj, dict):
+            return {k: convert_floats_to_decimal(v) for k, v in obj.items()}
+        elif isinstance(obj, list):
+            return [convert_floats_to_decimal(item) for item in obj]
+        elif isinstance(obj, float):
+            return Decimal(str(obj))
+        else:
+            return obj
+
+    trace_items = [convert_floats_to_decimal(item) for item in trace_items]
+    print(f"[VALIDATION_ENGINE] Converted floats to Decimal for all {len(trace_items)} items")
+
+    # Batch write for performance (up to 25 items per batch)
+    print(f"[VALIDATION_ENGINE] Starting batch write of {len(trace_items)} trace items")
+    try:
+        with dynamodb_client.table.batch_writer() as batch:
+            for idx, item in enumerate(trace_items, start=1):
+                batch.put_item(Item=item)
+                if idx % 25 == 0:
+                    print(f"[VALIDATION_ENGINE] Batch wrote {idx}/{len(trace_items)} traces")
+
+        print(f"[VALIDATION_ENGINE] Successfully wrote all {len(trace_items)} validation traces")
+
+        logger.info(
+            "Stored validation traces",
+            file_id=file_id,
+            trace_count=len(trace_items),
+            passed_count=sum(1 for item in trace_items if item['Passed']),
+            failed_count=sum(1 for item in trace_items if not item['Passed'])
+        )
+
+    except Exception as e:
+        print(f"[VALIDATION_ENGINE] ERROR: Failed to write validation traces: {str(e)}")
+        logger.error("Failed to write validation traces", error=str(e), file_id=file_id)
+        # Don't raise - traces are nice-to-have for audit but shouldn't fail validation
+
+
+def _store_validation_summary(
     file_id: str,
     umbrella_id: str,
     period_data: dict,
@@ -442,15 +572,18 @@ def _store_validation_snapshot(
     logger: StructuredLogger
 ):
     """
-    Store a complete validation snapshot in DynamoDB
+    Store a validation summary for quick access to aggregate statistics.
+
+    This complements the granular traces with a single summary item.
 
     Args:
         file_id: File ID being validated
+        umbrella_id: Umbrella company ID
+        period_data: Period information
         validation_results: Complete validation results from lambda_handler
-        event: Original event data (for metadata)
         logger: Logger instance
     """
-    print(f"[VALIDATION_ENGINE] _store_validation_snapshot() called with file_id={file_id}")
+    print(f"[VALIDATION_ENGINE] _store_validation_summary() called with file_id={file_id}")
 
     # Extract metadata
     period_id = period_data.get('PeriodID', 'UNKNOWN')
@@ -461,21 +594,20 @@ def _store_validation_snapshot(
     file_metadata = dynamodb_client.get_file_metadata(file_id)
     file_name = file_metadata.get('OriginalFilename', 'UNKNOWN') if file_metadata else 'UNKNOWN'
 
-    # Extract summary and ALL validation checks
+    # Extract summary
     has_critical_errors = validation_results.get('has_critical_errors', False)
     status = 'FAILED' if has_critical_errors else 'PASSED'
 
     validation_summary = validation_results.get('validation_summary', {})
-    all_checks = validation_results.get('all_validation_checks', [])
 
     # Create timestamp
     validated_at = datetime.utcnow().isoformat() + 'Z'
 
-    # Create enterprise validation snapshot with ALL checks for audit trail
-    snapshot_item = {
+    # Create validation summary item
+    summary_item = {
         'PK': f'FILE#{file_id}',
-        'SK': f'VALIDATION#{validated_at}',
-        'EntityType': 'ValidationSnapshot',
+        'SK': f'VALIDATION_SUMMARY#{validated_at}',
+        'EntityType': 'ValidationSummary',
         'FileID': file_id,
         'ValidatedAt': validated_at,
         'Status': status,
@@ -486,16 +618,15 @@ def _store_validation_snapshot(
         'PassedChecks': validation_summary.get('passed_checks', 0),
         'CriticalFailures': validation_summary.get('critical_failures', 0),
         'Warnings': validation_summary.get('warnings', 0),
-        'AllValidationChecks': all_checks,  # FULL AUDIT TRAIL - EVERY CHECK
         'UmbrellaID': umbrella_id,
         'PeriodID': period_id,
         'PeriodName': period_name,
         'FileName': file_name,
-        'GSI1PK': 'VALIDATIONS',
+        'GSI1PK': 'VALIDATION_SUMMARIES',
         'GSI1SK': validated_at
     }
 
-    print(f"[VALIDATION_ENGINE] Created snapshot with {len(all_checks)} total checks (Status={status})")
+    print(f"[VALIDATION_ENGINE] Created summary with Status={status}, TotalChecks={summary_item['TotalChecks']}")
 
     # Convert any float values to Decimal for DynamoDB
     from decimal import Decimal
@@ -511,23 +642,30 @@ def _store_validation_snapshot(
         else:
             return obj
 
-    snapshot_item = convert_floats_to_decimal(snapshot_item)
+    summary_item = convert_floats_to_decimal(summary_item)
 
     # Store in DynamoDB
-    print(f"[VALIDATION_ENGINE] Storing validation snapshot in DynamoDB")
-    dynamodb_client.table.put_item(Item=snapshot_item)
+    print(f"[VALIDATION_ENGINE] Storing validation summary in DynamoDB")
+    try:
+        dynamodb_client.table.put_item(Item=summary_item)
+        print(f"[VALIDATION_ENGINE] Validation summary stored successfully")
 
-    logger.info(
-        "Stored validation snapshot",
-        file_id=file_id,
-        status=status,
-        total_rules=len(validation_rules),
-        passed_rules=snapshot_item['PassedRules'],
-        failed_rules=snapshot_item['FailedRules']
-    )
+        logger.info(
+            "Stored validation summary",
+            file_id=file_id,
+            status=status,
+            total_checks=summary_item['TotalChecks'],
+            passed_checks=summary_item['PassedChecks'],
+            critical_failures=summary_item['CriticalFailures'],
+            warnings=summary_item['Warnings']
+        )
 
-    print(f"[VALIDATION_ENGINE] Validation snapshot stored successfully")
-    return snapshot_item
+        return summary_item
+
+    except Exception as e:
+        print(f"[VALIDATION_ENGINE] ERROR: Failed to write validation summary: {str(e)}")
+        logger.error("Failed to write validation summary", error=str(e), file_id=file_id)
+        # Don't raise - summary is nice-to-have but shouldn't fail validation
 
 
 print("[VALIDATION_ENGINE] Module load complete")

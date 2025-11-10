@@ -105,6 +105,9 @@ def lambda_handler(event, context):
         'dynamodb_warnings_deleted': 0,
         'orphaned_errors_deleted': 0,
         'orphaned_warnings_deleted': 0,
+        'orphaned_traces_deleted': 0,
+        'validation_traces_deleted': 0,
+        'validation_traces_failed': 0,
         'failed_files_cleaned': 0,
         'audit_logs_created': 0,
         'errors': []
@@ -682,7 +685,7 @@ def cleanup_validation_data(logger, cutoff_date, stats):
 
 def cleanup_orphaned_validation_data(logger, stats):
     """
-    Remove orphaned validation errors/warnings that reference non-existent files
+    Remove orphaned validation errors/warnings/traces that reference non-existent files
     """
     print(f"[CLEANUP_ORPHANS] ==================== Starting orphaned validation data cleanup ====================")
 
@@ -690,6 +693,90 @@ def cleanup_orphaned_validation_data(logger, stats):
     print("[CLEANUP_ORPHANS] Cleanup start logged")
 
     try:
+        # Initialize orphaned traces counter
+        if 'orphaned_traces_deleted' not in stats:
+            stats['orphaned_traces_deleted'] = 0
+
+        # Step 1: Check for orphaned validation traces
+        print("[CLEANUP_ORPHANS] ==================== Step 1: Scanning for orphaned validation traces ====================")
+        print("[CLEANUP_ORPHANS] Scanning table for all validation trace items")
+
+        # Scan for all items with SK starting with VALIDATION_TRACE#
+        scan_response = table.scan(
+            FilterExpression=Attr('SK').begins_with('VALIDATION_TRACE#')
+        )
+        all_trace_items = scan_response.get('Items', [])
+        print(f"[CLEANUP_ORPHANS] Found {len(all_trace_items)} validation trace items")
+
+        # Handle pagination for scan
+        while 'LastEvaluatedKey' in scan_response:
+            print(f"[CLEANUP_ORPHANS] Pagination detected, fetching more traces")
+            scan_response = table.scan(
+                FilterExpression=Attr('SK').begins_with('VALIDATION_TRACE#'),
+                ExclusiveStartKey=scan_response['LastEvaluatedKey']
+            )
+            all_trace_items.extend(scan_response.get('Items', []))
+            print(f"[CLEANUP_ORPHANS] Total validation traces found so far: {len(all_trace_items)}")
+
+        print(f"[CLEANUP_ORPHANS] Total validation trace items to check: {len(all_trace_items)}")
+
+        # Group traces by file_id for efficient checking
+        traces_by_file = {}
+        for trace in all_trace_items:
+            pk = trace.get('PK', '')
+            if pk.startswith('FILE#'):
+                file_id = pk.replace('FILE#', '')
+                if file_id not in traces_by_file:
+                    traces_by_file[file_id] = []
+                traces_by_file[file_id].append(trace)
+
+        print(f"[CLEANUP_ORPHANS] Traces grouped by {len(traces_by_file)} unique files")
+
+        # Check each file and delete orphaned traces
+        for file_id, traces in traces_by_file.items():
+            print(f"[CLEANUP_ORPHANS] -------------------- Checking file {file_id} ({len(traces)} traces) --------------------")
+
+            try:
+                file_response = table.get_item(
+                    Key={
+                        'PK': f'FILE#{file_id}',
+                        'SK': 'METADATA'
+                    }
+                )
+
+                if 'Item' not in file_response:
+                    print(f"[CLEANUP_ORPHANS] File {file_id} does not exist, traces are orphaned")
+                    print(f"[CLEANUP_ORPHANS] Deleting {len(traces)} orphaned validation traces")
+
+                    # Batch delete orphaned traces
+                    with table.batch_writer() as batch:
+                        for trace in traces:
+                            print(f"[CLEANUP_ORPHANS] Deleting orphaned trace: SK={trace['SK']}")
+                            batch.delete_item(
+                                Key={
+                                    'PK': trace['PK'],
+                                    'SK': trace['SK']
+                                }
+                            )
+                            stats['orphaned_traces_deleted'] += 1
+
+                    logger.info("Deleted orphaned validation traces",
+                               file_id=file_id,
+                               traces_deleted=len(traces))
+                    print(f"[CLEANUP_ORPHANS] Deleted {len(traces)} orphaned traces for file {file_id}")
+                else:
+                    print(f"[CLEANUP_ORPHANS] File {file_id} exists, traces are not orphaned")
+
+            except Exception as e:
+                print(f"[CLEANUP_ORPHANS] !!!!!!!!!!! EXCEPTION checking/deleting orphaned traces !!!!!!!!!!!")
+                print(f"[CLEANUP_ORPHANS] Exception: {str(e)}")
+                error_msg = f"Failed to process orphaned traces for file {file_id}: {str(e)}"
+                stats['errors'].append(error_msg)
+
+        print(f"[CLEANUP_ORPHANS] Orphaned traces cleanup complete: {stats['orphaned_traces_deleted']} traces deleted")
+
+        # Step 2: Check for orphaned errors
+        print("[CLEANUP_ORPHANS] ==================== Step 2: Checking orphaned errors ====================")
         print("[CLEANUP_ORPHANS] Querying GSI1 for all errors")
         errors_response = table.query(
             IndexName='GSI1',
@@ -746,6 +833,8 @@ def cleanup_orphaned_validation_data(logger, stats):
                 error_msg = f"Failed to process orphaned error: {str(e)}"
                 stats['errors'].append(error_msg)
 
+        # Step 3: Check for orphaned warnings
+        print("[CLEANUP_ORPHANS] ==================== Step 3: Checking orphaned warnings ====================")
         print("[CLEANUP_ORPHANS] Querying GSI1 for all warnings")
         warnings_response = table.query(
             IndexName='GSI1',
@@ -803,10 +892,12 @@ def cleanup_orphaned_validation_data(logger, stats):
                 stats['errors'].append(error_msg)
 
         print(f"[CLEANUP_ORPHANS] ==================== Orphaned validation data cleanup complete ====================")
+        print(f"[CLEANUP_ORPHANS] Orphaned traces deleted: {stats['orphaned_traces_deleted']}")
         print(f"[CLEANUP_ORPHANS] Orphaned errors deleted: {stats['orphaned_errors_deleted']}")
         print(f"[CLEANUP_ORPHANS] Orphaned warnings deleted: {stats['orphaned_warnings_deleted']}")
 
         logger.info("Orphaned validation data cleanup completed",
+                   orphaned_traces_deleted=stats['orphaned_traces_deleted'],
                    orphaned_errors_deleted=stats['orphaned_errors_deleted'],
                    orphaned_warnings_deleted=stats['orphaned_warnings_deleted'])
         print("[CLEANUP_ORPHANS] Cleanup completion logged")
@@ -873,9 +964,28 @@ def cleanup_failed_files(logger, cutoff_date, stats):
                     print(f"[CLEANUP_FAILED] S3Key: {s3_key}")
 
                     try:
-                        # Delete from S3 if S3Key exists
+                        # Step 1: Cascade delete validation traces
+                        print(f"[CLEANUP_FAILED] Step 1: Cascade deleting validation traces for file {file_id}")
+                        try:
+                            traces_deleted, traces_failed = cascade_delete_validation_traces(
+                                file_id, logger, stats
+                            )
+                            print(f"[CLEANUP_FAILED] Validation traces cascade delete: {traces_deleted} deleted, {traces_failed} failed")
+
+                            if traces_failed > 0:
+                                logger.warning(f"Partial validation trace deletion for file {file_id}",
+                                             traces_deleted=traces_deleted,
+                                             traces_failed=traces_failed)
+                        except Exception as cascade_error:
+                            print(f"[CLEANUP_FAILED] WARNING: Cascade delete failed: {str(cascade_error)}")
+                            logger.error("Cascade delete failed, continuing with cleanup",
+                                       file_id=file_id,
+                                       error=str(cascade_error))
+                            # Continue with cleanup even if cascade delete fails
+
+                        # Step 2: Delete from S3 if S3Key exists
                         if s3_key:
-                            print(f"[CLEANUP_FAILED] Deleting S3 object: {s3_key}")
+                            print(f"[CLEANUP_FAILED] Step 2: Deleting S3 object: {s3_key}")
                             try:
                                 s3_client.delete_object(Bucket=S3_BUCKET_NAME, Key=s3_key)
                                 print(f"[CLEANUP_FAILED] S3 object deleted: {s3_key}")
@@ -883,26 +993,21 @@ def cleanup_failed_files(logger, cutoff_date, stats):
                                 print(f"[CLEANUP_FAILED] Failed to delete S3 object: {str(s3_error)}")
                                 print(f"[CLEANUP_FAILED] Continuing with DynamoDB deletion")
 
-                        # Delete file metadata from DynamoDB
-                        print(f"[CLEANUP_FAILED] Deleting file metadata: PK=FILE#{file_id}, SK=METADATA")
-                        table.delete_item(
-                            Key={
-                                'PK': f'FILE#{file_id}',
-                                'SK': 'METADATA'
-                            }
-                        )
-                        print(f"[CLEANUP_FAILED] File metadata deleted")
-
-                        # Delete associated errors and warnings
-                        print(f"[CLEANUP_FAILED] Querying for associated errors and warnings")
+                        # Step 3: Delete associated errors, warnings, and records
+                        print(f"[CLEANUP_FAILED] Step 3: Querying for associated items (errors, warnings, records)")
                         associated_items = table.query(
                             KeyConditionExpression=Key('PK').eq(f'FILE#{file_id}')
                         )
-                        print(f"[CLEANUP_FAILED] Associated items found: {len(associated_items.get('Items', []))}")
+                        print(f"[CLEANUP_FAILED] Associated items found: {len(associated_items.get('Items', []))} items")
 
                         print(f"[CLEANUP_FAILED] Deleting associated items in batch")
                         with table.batch_writer() as batch:
                             for item in associated_items.get('Items', []):
+                                # Skip validation traces as they're already deleted
+                                if item['SK'].startswith('VALIDATION_TRACE#'):
+                                    print(f"[CLEANUP_FAILED] Skipping validation trace (already deleted): {item['SK']}")
+                                    continue
+
                                 print(f"[CLEANUP_FAILED] Deleting: PK={item['PK']}, SK={item['SK']}")
                                 batch.delete_item(
                                     Key={
@@ -1023,6 +1128,131 @@ def create_cleanup_audit_log(logger, stats, cutoff_date):
 
         logger.error("Failed to create audit log", error=str(e))
         print(f"[AUDIT_LOG] Error logged")
+
+
+def cascade_delete_validation_traces(file_id, logger, stats):
+    """
+    Cascade delete all validation traces associated with a file
+
+    When a file is deleted, this function removes all validation trace items
+    that have PK=FILE#<file_id> and SK begins_with VALIDATION_TRACE#
+
+    Args:
+        file_id: The file identifier
+        logger: StructuredLogger instance for logging
+        stats: Dictionary to track deletion statistics
+
+    Returns:
+        tuple: (traces_deleted, traces_failed)
+    """
+    print(f"[CASCADE_DELETE] ==================== Starting cascade delete for file {file_id} ====================")
+    logger.info("Starting cascade delete of validation traces", file_id=file_id)
+
+    traces_deleted = 0
+    traces_failed = 0
+
+    try:
+        # Step 1 & 2: Query all validation traces with pagination
+        print(f"[CASCADE_DELETE] Querying for validation traces: PK=FILE#{file_id}, SK begins_with VALIDATION_TRACE#")
+        all_traces = []
+        last_key = None
+        page_count = 0
+
+        while True:
+            page_count += 1
+            print(f"[CASCADE_DELETE] Processing page {page_count}")
+
+            query_kwargs = {
+                'KeyConditionExpression': Key('PK').eq(f'FILE#{file_id}') & Key('SK').begins_with('VALIDATION_TRACE#')
+            }
+
+            if last_key:
+                query_kwargs['ExclusiveStartKey'] = last_key
+                print(f"[CASCADE_DELETE] Using ExclusiveStartKey for pagination: {last_key}")
+
+            response = table.query(**query_kwargs)
+            page_items = response.get('Items', [])
+            all_traces.extend(page_items)
+            print(f"[CASCADE_DELETE] Page {page_count} returned {len(page_items)} traces")
+
+            last_key = response.get('LastEvaluatedKey')
+            if not last_key:
+                print(f"[CASCADE_DELETE] No more pages to fetch")
+                break
+
+        print(f"[CASCADE_DELETE] Found total of {len(all_traces)} validation traces for file {file_id}")
+        logger.info("Validation traces found", file_id=file_id, trace_count=len(all_traces))
+
+        # Step 3: Batch delete with error handling
+        if all_traces:
+            print(f"[CASCADE_DELETE] Starting batch deletion of {len(all_traces)} traces")
+
+            with table.batch_writer(overwrite_by_pkeys=['PK', 'SK']) as batch:
+                for idx, trace in enumerate(all_traces, 1):
+                    try:
+                        print(f"[CASCADE_DELETE] Deleting trace {idx}/{len(all_traces)}: SK={trace.get('SK')}")
+                        batch.delete_item(
+                            Key={
+                                'PK': trace['PK'],
+                                'SK': trace['SK']
+                            }
+                        )
+                        traces_deleted += 1
+
+                        # Log every 100 deletions for audit trail
+                        if idx % 100 == 0:
+                            logger.info(f"Batch delete progress: {idx}/{len(all_traces)} traces deleted")
+                            print(f"[CASCADE_DELETE] Progress: {idx}/{len(all_traces)} traces deleted")
+
+                    except Exception as e:
+                        traces_failed += 1
+                        error_msg = f"Failed to delete trace {trace.get('SK')}: {str(e)}"
+                        print(f"[CASCADE_DELETE] ERROR: {error_msg}")
+                        logger.error("Failed to delete validation trace",
+                                   file_id=file_id,
+                                   trace_sk=trace.get('SK'),
+                                   error=str(e))
+
+                        if 'errors' in stats:
+                            stats['errors'].append(error_msg)
+
+            print(f"[CASCADE_DELETE] Batch deletion complete")
+        else:
+            print(f"[CASCADE_DELETE] No validation traces found for file {file_id}")
+
+        # Update statistics
+        if 'validation_traces_deleted' not in stats:
+            stats['validation_traces_deleted'] = 0
+        if 'validation_traces_failed' not in stats:
+            stats['validation_traces_failed'] = 0
+
+        stats['validation_traces_deleted'] += traces_deleted
+        stats['validation_traces_failed'] += traces_failed
+
+        print(f"[CASCADE_DELETE] ==================== Cascade delete completed ====================")
+        print(f"[CASCADE_DELETE] Traces deleted: {traces_deleted}")
+        print(f"[CASCADE_DELETE] Traces failed: {traces_failed}")
+
+        logger.info("Cascade delete completed",
+                   file_id=file_id,
+                   traces_deleted=traces_deleted,
+                   traces_failed=traces_failed)
+
+        return traces_deleted, traces_failed
+
+    except Exception as e:
+        print(f"[CASCADE_DELETE] !!!!!!!!!!! CRITICAL EXCEPTION in cascade_delete_validation_traces !!!!!!!!!!!")
+        print(f"[CASCADE_DELETE] Exception type: {type(e).__name__}")
+        print(f"[CASCADE_DELETE] Exception message: {str(e)}")
+
+        error_msg = f"Critical error in cascade delete for file {file_id}: {str(e)}"
+        logger.error("Cascade delete critical error", file_id=file_id, error=str(e))
+
+        if 'errors' in stats:
+            stats['errors'].append(error_msg)
+
+        # Re-raise to allow caller to handle
+        raise
 
 
 print("[CLEANUP_HANDLER] Module fully loaded and ready")

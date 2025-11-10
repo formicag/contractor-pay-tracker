@@ -13,20 +13,17 @@ on:
         type: choice
         options:
           - development
+          - staging
           - production
 
 env:
   AWS_REGION: eu-west-2
+  PYTHON_VERSION: '3.12'
 
 jobs:
-  deploy:
-    name: Deploy SAM Application
+  pre-deploy-checks:
+    name: Pre-Deployment Validation
     runs-on: ubuntu-latest
-    environment: ${{ github.event.inputs.environment || 'development' }}
-
-    permissions:
-      id-token: write
-      contents: read
 
     steps:
       - name: Checkout code
@@ -35,7 +32,92 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.12'
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: 'pip'
+
+      - name: Validate Python syntax
+        run: |
+          python -m py_compile backend/functions/*/app.py
+          python -m py_compile backend/layers/common/python/common/*.py
+
+      - name: Check for security issues
+        run: |
+          pip install bandit
+          bandit -r backend/functions backend/layers/common/python -ll
+
+  build-lambda-packages:
+    name: Build Lambda Packages
+    runs-on: ubuntu-latest
+    needs: pre-deploy-checks
+    strategy:
+      matrix:
+        lambda:
+          - file_upload_handler
+          - file_processor
+          - validation_engine
+          - report_generator
+          - cleanup_handler
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: 'pip'
+
+      - name: Cache Lambda dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            backend/functions/${{ matrix.lambda }}/package
+          key: ${{ runner.os }}-lambda-${{ matrix.lambda }}-${{ hashFiles('backend/functions/${{ matrix.lambda }}/requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-lambda-${{ matrix.lambda }}-
+
+      - name: Build Lambda package
+        run: |
+          mkdir -p dist/${{ matrix.lambda }}
+          cp backend/functions/${{ matrix.lambda }}/app.py dist/${{ matrix.lambda }}/
+
+          if [ -f backend/functions/${{ matrix.lambda }}/requirements.txt ]; then
+            pip install -r backend/functions/${{ matrix.lambda }}/requirements.txt -t dist/${{ matrix.lambda }}/
+          fi
+
+          cd dist/${{ matrix.lambda }}
+          zip -r ../${{ matrix.lambda }}.zip .
+
+      - name: Upload Lambda artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: lambda-${{ matrix.lambda }}
+          path: dist/${{ matrix.lambda }}.zip
+          retention-days: 7
+
+  deploy:
+    name: Deploy to ${{ github.event.inputs.environment || 'development' }}
+    runs-on: ubuntu-latest
+    needs: build-lambda-packages
+    environment: ${{ github.event.inputs.environment || 'development' }}
+
+    permissions:
+      id-token: write
+      contents: read
+
+    outputs:
+      stack-outputs: ${{ steps.outputs.outputs.stack_outputs }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: 'pip'
 
       - name: Set up AWS SAM CLI
         uses: aws-actions/setup-sam@v2
@@ -46,26 +128,45 @@ jobs:
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
-          role-session-name: GitHubActions
+          role-session-name: GitHubActions-Deploy
           aws-region: ${{ env.AWS_REGION }}
+
+      - name: Cache SAM build
+        uses: actions/cache@v4
+        with:
+          path: backend/.aws-sam
+          key: ${{ runner.os }}-sam-${{ hashFiles('backend/template.yaml', 'backend/**/*.py') }}
+          restore-keys: |
+            ${{ runner.os }}-sam-
 
       - name: SAM Build
         run: |
           cd backend
-          sam build
+          sam build --use-container --cached
+
+      - name: SAM Validate
+        run: |
+          cd backend
+          sam validate
 
       - name: SAM Deploy
+        id: deploy
         run: |
           cd backend
           sam deploy \
             --stack-name contractor-pay-tracker-${{ github.event.inputs.environment || 'development' }} \
             --region ${{ env.AWS_REGION }} \
-            --capabilities CAPABILITY_IAM \
+            --capabilities CAPABILITY_IAM CAPABILITY_NAMED_IAM \
             --parameter-overrides \
               Environment=${{ github.event.inputs.environment || 'development' }} \
               LogLevel=INFO \
             --no-confirm-changeset \
-            --no-fail-on-empty-changeset
+            --no-fail-on-empty-changeset \
+            --tags \
+              Project=contractor-pay-tracker \
+              Environment=${{ github.event.inputs.environment || 'development' }} \
+              DeployedBy=GitHub-Actions \
+              CommitSHA=${{ github.sha }}
 
       - name: Get Stack Outputs
         id: outputs
@@ -80,8 +181,161 @@ jobs:
           echo "Stack outputs saved"
           cat stack-outputs.json
 
+          # Export outputs for next jobs
+          echo "stack_outputs=$(cat stack-outputs.json | jq -c .)" >> $GITHUB_OUTPUT
+
       - name: Upload Stack Outputs
         uses: actions/upload-artifact@v4
         with:
-          name: stack-outputs
+          name: stack-outputs-${{ github.event.inputs.environment || 'development' }}
           path: backend/stack-outputs.json
+          retention-days: 30
+
+  smoke-tests:
+    name: Post-Deployment Smoke Tests
+    runs-on: ubuntu-latest
+    needs: deploy
+    if: success()
+
+    permissions:
+      id-token: write
+      contents: read
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          role-session-name: GitHubActions-SmokeTests
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Install test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install boto3 requests
+
+      - name: Test Lambda functions
+        env:
+          STACK_NAME: contractor-pay-tracker-${{ github.event.inputs.environment || 'development' }}
+        run: |
+          cat > smoke_test.py << 'EOF'
+          import boto3
+          import json
+          import sys
+          import os
+
+          def test_lambda_health():
+              client = boto3.client('lambda', region_name=os.environ['AWS_REGION'])
+              stack_name = os.environ['STACK_NAME']
+
+              # Get Lambda functions from CloudFormation stack
+              cf_client = boto3.client('cloudformation', region_name=os.environ['AWS_REGION'])
+              resources = cf_client.list_stack_resources(StackName=stack_name)
+
+              lambda_functions = [
+                  r['PhysicalResourceId'] for r in resources['StackResourceSummaries']
+                  if r['ResourceType'] == 'AWS::Lambda::Function'
+              ]
+
+              print(f"Testing {len(lambda_functions)} Lambda functions...")
+              failed = []
+
+              for func_name in lambda_functions:
+                  try:
+                      response = client.get_function(FunctionName=func_name)
+                      state = response['Configuration']['State']
+                      print(f"  Lambda {func_name}: {state}")
+
+                      if state != 'Active':
+                          failed.append(func_name)
+                  except Exception as e:
+                      print(f"  Lambda {func_name}: ERROR - {str(e)}")
+                      failed.append(func_name)
+
+              if failed:
+                  print(f"\nFailed Lambda checks: {', '.join(failed)}")
+                  sys.exit(1)
+              else:
+                  print("\nAll Lambda functions are healthy")
+
+          if __name__ == '__main__':
+              test_lambda_health()
+          EOF
+
+          python smoke_test.py
+
+      - name: Test DynamoDB table
+        env:
+          STACK_NAME: contractor-pay-tracker-${{ github.event.inputs.environment || 'development' }}
+        run: |
+          # Get DynamoDB table name from stack
+          TABLE_NAME=$(aws cloudformation describe-stacks \
+            --stack-name $STACK_NAME \
+            --query 'Stacks[0].Outputs[?OutputKey==`TableName`].OutputValue' \
+            --output text)
+
+          if [ -n "$TABLE_NAME" ]; then
+            echo "Testing DynamoDB table: $TABLE_NAME"
+            aws dynamodb describe-table --table-name "$TABLE_NAME"
+            echo "DynamoDB table is healthy"
+          else
+            echo "Warning: Could not find DynamoDB table in stack outputs"
+          fi
+
+      - name: Test S3 bucket
+        env:
+          STACK_NAME: contractor-pay-tracker-${{ github.event.inputs.environment || 'development' }}
+        run: |
+          # Get S3 bucket name from stack
+          BUCKET_NAME=$(aws cloudformation describe-stacks \
+            --stack-name $STACK_NAME \
+            --query 'Stacks[0].Outputs[?OutputKey==`BucketName`].OutputValue' \
+            --output text)
+
+          if [ -n "$BUCKET_NAME" ]; then
+            echo "Testing S3 bucket: $BUCKET_NAME"
+            aws s3 ls "s3://$BUCKET_NAME/" || echo "Bucket exists but is empty"
+            echo "S3 bucket is healthy"
+          else
+            echo "Warning: Could not find S3 bucket in stack outputs"
+          fi
+
+  deployment-summary:
+    name: Deployment Summary
+    runs-on: ubuntu-latest
+    needs: [deploy, smoke-tests]
+    if: always()
+
+    steps:
+      - name: Download stack outputs
+        uses: actions/download-artifact@v4
+        with:
+          name: stack-outputs-${{ github.event.inputs.environment || 'development' }}
+          path: outputs/
+
+      - name: Create deployment summary
+        run: |
+          echo "## Deployment Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Environment: **${{ github.event.inputs.environment || 'development' }}**" >> $GITHUB_STEP_SUMMARY
+          echo "Region: **${{ env.AWS_REGION }}**" >> $GITHUB_STEP_SUMMARY
+          echo "Commit: **${{ github.sha }}**" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Deployment Status" >> $GITHUB_STEP_SUMMARY
+          echo "- Pre-Deploy Checks: ${{ needs.pre-deploy-checks.result }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Build: ${{ needs.build-lambda-packages.result }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Deploy: ${{ needs.deploy.result }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Smoke Tests: ${{ needs.smoke-tests.result }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Stack Outputs" >> $GITHUB_STEP_SUMMARY
+          echo '```json' >> $GITHUB_STEP_SUMMARY
+          cat outputs/stack-outputs.json >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY

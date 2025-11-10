@@ -1,0 +1,313 @@
+# =============================================================================
+# SQS-Based Processing Architecture (NO STEP FUNCTIONS)
+# Simple, debuggable, bulletproof queue chain with DLQs
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# Queue 1: Upload Queue
+# Triggered by S3 uploads via EventBridge
+# -----------------------------------------------------------------------------
+resource "aws_sqs_queue" "upload_queue_dlq" {
+  name                      = "contractor-pay-upload-dlq-${var.environment}"
+  message_retention_seconds = 1209600 # 14 days - keep failures visible
+
+  tags = {
+    Name        = "contractor-pay-upload-dlq-${var.environment}"
+    Queue       = "upload-dlq"
+    Description = "Dead letter queue for failed file uploads"
+    Environment = var.environment
+    Project     = "contractor-pay-tracker"
+    ManagedBy   = "terraform"
+  }
+}
+
+resource "aws_sqs_queue" "upload_queue" {
+  name                       = "contractor-pay-upload-queue-${var.environment}"
+  visibility_timeout_seconds = 300 # 5 min (Lambda timeout)
+  message_retention_seconds  = 1209600 # 14 days
+  receive_wait_time_seconds  = 20 # Long polling for cost savings
+
+  # After 3 failures, send to DLQ
+  redrive_policy = jsonencode({
+    deadLetterTargetArn = aws_sqs_queue.upload_queue_dlq.arn
+    maxReceiveCount     = 3
+  })
+
+  tags = {
+    Environment = var.environment
+    Project     = "contractor-pay-tracker"
+    ManagedBy   = "terraform"
+    Name        = "contractor-pay-upload-queue-${var.environment}"
+    Queue       = "upload"
+    Description = "Receives S3 upload events, triggers metadata extraction"
+  })
+}
+
+# CloudWatch Alarm: Alert when messages land in DLQ
+resource "aws_cloudwatch_metric_alarm" "upload_dlq_alarm" {
+  alarm_name          = "contractor-pay-upload-dlq-has-messages-${var.environment}"
+  comparison_operator = "GreaterThanThreshold"
+  evaluation_periods  = 1
+  metric_name         = "ApproximateNumberOfMessagesVisible"
+  namespace           = "AWS/SQS"
+  period              = 300
+  statistic           = "Average"
+  threshold           = 0
+  alarm_description   = "Alert when messages land in upload DLQ (files failing at metadata extraction)"
+  treat_missing_data  = "notBreaching"
+
+  dimensions = {
+    QueueName = aws_sqs_queue.upload_queue_dlq.name
+  }
+
+  tags = {
+    Environment = var.environment
+    Project     = "contractor-pay-tracker"
+    ManagedBy   = "terraform"
+    Name  = "upload-dlq-alarm"
+    Queue = "upload-dlq"
+  })
+}
+
+# -----------------------------------------------------------------------------
+# Queue 2: Validation Queue
+# Receives files after metadata extraction
+# -----------------------------------------------------------------------------
+resource "aws_sqs_queue" "validation_queue_dlq" {
+  name                      = "contractor-pay-validation-dlq-${var.environment}"
+  message_retention_seconds = 1209600
+
+  tags = {
+    Environment = var.environment
+    Project     = "contractor-pay-tracker"
+    ManagedBy   = "terraform"
+    Name        = "contractor-pay-validation-dlq-${var.environment}"
+    Queue       = "validation-dlq"
+    Description = "Dead letter queue for failed validations"
+  })
+}
+
+resource "aws_sqs_queue" "validation_queue" {
+  name                       = "contractor-pay-validation-queue-${var.environment}"
+  visibility_timeout_seconds = 600 # 10 min (validation can be slow)
+  message_retention_seconds  = 1209600
+  receive_wait_time_seconds  = 20
+
+  redrive_policy = jsonencode({
+    deadLetterTargetArn = aws_sqs_queue.validation_queue_dlq.arn
+    maxReceiveCount     = 3
+  })
+
+  tags = {
+    Environment = var.environment
+    Project     = "contractor-pay-tracker"
+    ManagedBy   = "terraform"
+    Name        = "contractor-pay-validation-queue-${var.environment}"
+    Queue       = "validation"
+    Description = "Runs enterprise-grade data validations"
+  })
+}
+
+resource "aws_cloudwatch_metric_alarm" "validation_dlq_alarm" {
+  alarm_name          = "contractor-pay-validation-dlq-has-messages-${var.environment}"
+  comparison_operator = "GreaterThanThreshold"
+  evaluation_periods  = 1
+  metric_name         = "ApproximateNumberOfMessagesVisible"
+  namespace           = "AWS/SQS"
+  period              = 300
+  statistic           = "Average"
+  threshold           = 0
+  alarm_description   = "Alert when messages land in validation DLQ (files failing validation)"
+  treat_missing_data  = "notBreaching"
+
+  dimensions = {
+    QueueName = aws_sqs_queue.validation_queue_dlq.name
+  }
+
+  tags = {
+    Environment = var.environment
+    Project     = "contractor-pay-tracker"
+    ManagedBy   = "terraform"
+    Name  = "validation-dlq-alarm"
+    Queue = "validation-dlq"
+  })
+}
+
+# -----------------------------------------------------------------------------
+# Queue 3: Import Queue
+# Receives validated files ready for DynamoDB import
+# -----------------------------------------------------------------------------
+resource "aws_sqs_queue" "import_queue_dlq" {
+  name                      = "contractor-pay-import-dlq-${var.environment}"
+  message_retention_seconds = 1209600
+
+  tags = {
+    Environment = var.environment
+    Project     = "contractor-pay-tracker"
+    ManagedBy   = "terraform"
+    Name        = "contractor-pay-import-dlq-${var.environment}"
+    Queue       = "import-dlq"
+    Description = "Dead letter queue for failed imports"
+  })
+}
+
+resource "aws_sqs_queue" "import_queue" {
+  name                       = "contractor-pay-import-queue-${var.environment}"
+  visibility_timeout_seconds = 600 # 10 min (batch imports can be slow)
+  message_retention_seconds  = 1209600
+  receive_wait_time_seconds  = 20
+
+  redrive_policy = jsonencode({
+    deadLetterTargetArn = aws_sqs_queue.import_queue_dlq.arn
+    maxReceiveCount     = 3
+  })
+
+  tags = {
+    Environment = var.environment
+    Project     = "contractor-pay-tracker"
+    ManagedBy   = "terraform"
+    Name        = "contractor-pay-import-queue-${var.environment}"
+    Queue       = "import"
+    Description = "Imports validated records to DynamoDB"
+  })
+}
+
+resource "aws_cloudwatch_metric_alarm" "import_dlq_alarm" {
+  alarm_name          = "contractor-pay-import-dlq-has-messages-${var.environment}"
+  comparison_operator = "GreaterThanThreshold"
+  evaluation_periods  = 1
+  metric_name         = "ApproximateNumberOfMessagesVisible"
+  namespace           = "AWS/SQS"
+  period              = 300
+  statistic           = "Average"
+  threshold           = 0
+  alarm_description   = "Alert when messages land in import DLQ (files failing at import stage)"
+  treat_missing_data  = "notBreaching"
+
+  dimensions = {
+    QueueName = aws_sqs_queue.import_queue_dlq.name
+  }
+
+  tags = {
+    Environment = var.environment
+    Project     = "contractor-pay-tracker"
+    ManagedBy   = "terraform"
+    Name  = "import-dlq-alarm"
+    Queue = "import-dlq"
+  })
+}
+
+# -----------------------------------------------------------------------------
+# EventBridge Rule: S3 Upload → Upload Queue
+# Replaces Step Functions trigger
+# -----------------------------------------------------------------------------
+resource "aws_cloudwatch_event_rule" "s3_upload" {
+  name        = "contractor-pay-s3-upload-${var.environment}"
+  description = "Trigger processing when Excel file uploaded to S3 production folder"
+
+  event_pattern = jsonencode({
+    source      = ["aws.s3"]
+    detail-type = ["Object Created"]
+    detail = {
+      bucket = {
+        name = [aws_s3_bucket.pay_files.id]
+      }
+      object = {
+        key = [{
+          prefix = "production/"
+        }]
+      }
+    }
+  })
+
+  tags = {
+    Environment = var.environment
+    Project     = "contractor-pay-tracker"
+    ManagedBy   = "terraform"
+    Name        = "s3-upload-rule"
+    Description = "Routes S3 uploads to SQS queue"
+  })
+}
+
+resource "aws_cloudwatch_event_target" "s3_to_sqs" {
+  rule      = aws_cloudwatch_event_rule.s3_upload.name
+  target_id = "SendToUploadQueue"
+  arn       = aws_sqs_queue.upload_queue.arn
+
+  # Transform S3 event to simple message format
+  input_transformer {
+    input_paths = {
+      bucket = "$.detail.bucket.name"
+      key    = "$.detail.object.key"
+      size   = "$.detail.object.size"
+      time   = "$.time"
+    }
+
+    input_template = <<EOF
+{
+  "s3_bucket": <bucket>,
+  "s3_key": <key>,
+  "file_size": <size>,
+  "upload_time": <time>,
+  "source": "s3-upload-event"
+}
+EOF
+  }
+}
+
+# Allow EventBridge to send to SQS
+resource "aws_sqs_queue_policy" "upload_queue_policy" {
+  queue_url = aws_sqs_queue.upload_queue.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Principal = {
+          Service = "events.amazonaws.com"
+        }
+        Action   = "sqs:SendMessage"
+        Resource = aws_sqs_queue.upload_queue.arn
+        Condition = {
+          ArnEquals = {
+            "aws:SourceArn" = aws_cloudwatch_event_rule.s3_upload.arn
+          }
+        }
+      }
+    ]
+  })
+}
+
+# -----------------------------------------------------------------------------
+# Outputs
+# -----------------------------------------------------------------------------
+output "upload_queue_url" {
+  value       = aws_sqs_queue.upload_queue.url
+  description = "URL for upload queue"
+}
+
+output "validation_queue_url" {
+  value       = aws_sqs_queue.validation_queue.url
+  description = "URL for validation queue"
+}
+
+output "import_queue_url" {
+  value       = aws_sqs_queue.import_queue.url
+  description = "URL for import queue"
+}
+
+output "upload_dlq_url" {
+  value       = aws_sqs_queue.upload_queue_dlq.url
+  description = "URL for upload DLQ (check this for failed files)"
+}
+
+output "validation_dlq_url" {
+  value       = aws_sqs_queue.validation_queue_dlq.url
+  description = "URL for validation DLQ (check this for validation failures)"
+}
+
+output "import_dlq_url" {
+  value       = aws_sqs_queue.import_queue_dlq.url
+  description = "URL for import DLQ (check this for import failures)"
+}

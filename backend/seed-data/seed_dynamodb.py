@@ -22,7 +22,7 @@ def get_table_name(stack_name=None, table_name=None):
     if table_name:
         return table_name
 
-    cf_client = boto3.client('cloudformation')
+    cf_client = boto3.client('cloudformation', region_name='eu-west-2')
     response = cf_client.describe_stacks(StackName=stack_name)
     outputs = response['Stacks'][0]['Outputs']
     return next(o['OutputValue'] for o in outputs if o['OutputKey'] == 'DynamoDBTableName')
@@ -100,41 +100,10 @@ def seed_umbrella_companies(table):
     return umbrella_map
 
 
-def seed_permanent_staff(table):
-    """Insert 4 permanent staff members (to reject in validation)"""
-    print("\n" + "="*80)
-    print("STEP 3: Seeding permanent staff (validation blacklist)...")
-    print("="*80)
-
-    staff = [
-        ('Syed', 'Syed', 'syed syed'),
-        ('Victor', 'Cheung', 'victor cheung'),
-        ('Gareth', 'Jones', 'gareth jones'),
-        ('Martin', 'Alabone', 'martin alabone'),
-    ]
-
-    with table.batch_writer() as batch:
-        for first_name, last_name, normalized_name in staff:
-            batch.put_item(Item={
-                'PK': f'PERMANENT#{normalized_name}',
-                'SK': 'PROFILE',
-                'EntityType': 'PermanentStaff',
-                'FirstName': first_name,
-                'LastName': last_name,
-                'NormalizedName': normalized_name,
-                'CreatedAt': datetime.utcnow().isoformat() + 'Z',
-                'GSI2PK': 'PERMANENT_CHECK',
-                'GSI2SK': f'NAME#{normalized_name}'
-            })
-
-    print(f"✓ Inserted {len(staff)} permanent staff members")
-    print("  → These names will trigger CRITICAL errors if found in pay files")
-
-
 def seed_pay_periods(table):
     """Insert 13 pay periods for 2025-2026"""
     print("\n" + "="*80)
-    print("STEP 4: Seeding pay periods (13 periods)...")
+    print("STEP 3: Seeding pay periods (13 periods)...")
     print("="*80)
 
     periods = [
@@ -346,7 +315,6 @@ def verify_seed_data(table):
     checks = {
         'System parameters': ('PARAM#', 6),
         'Umbrella companies': ('UMBRELLA#', 6),
-        'Permanent staff': ('PERMANENT#', 4),
         'Pay periods': ('PERIOD#', 13),
         'Contractors': ('CONTRACTOR#', 23),
     }
@@ -455,13 +423,12 @@ def main():
         table_name = get_table_name(args.stack_name, args.table_name)
         print(f"DynamoDB Table: {table_name}\n")
 
-        dynamodb = boto3.resource('dynamodb')
+        dynamodb = boto3.resource('dynamodb', region_name='eu-west-2')
         table = dynamodb.Table(table_name)
 
         # Run seeding steps
         seed_system_parameters(table)
         umbrella_map = seed_umbrella_companies(table)
-        seed_permanent_staff(table)
         seed_pay_periods(table)
         contractor_map = seed_contractors(table)
         contractor_map, umbrella_map = seed_contractor_umbrella_associations(

@@ -1,0 +1,885 @@
+{% extends "base.html" %}
+
+{% block title %}Debug Files - Operations Dashboard{% endblock %}
+
+{% block extra_css %}
+<style>
+    /* Three-panel layout */
+    .debug-container {
+        display: flex;
+        gap: 1rem;
+        height: calc(100vh - 150px);
+        margin-bottom: 1rem;
+    }
+
+    .panel {
+        flex: 1;
+        background: var(--bg-secondary);
+        border: 1px solid var(--border);
+        border-radius: 0.5rem;
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+    }
+
+    .panel-header {
+        background: var(--bg-tertiary);
+        padding: 1rem;
+        border-bottom: 1px solid var(--border);
+        font-weight: 600;
+        font-size: 0.875rem;
+        color: var(--text-primary);
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+    }
+
+    .panel-content {
+        flex: 1;
+        overflow-y: auto;
+        padding: 1rem;
+    }
+
+    /* Excel viewer styles */
+    .excel-table {
+        width: 100%;
+        font-size: 0.75rem;
+        border-collapse: collapse;
+    }
+
+    .excel-table th,
+    .excel-table td {
+        border: 1px solid var(--border);
+        padding: 0.5rem;
+        text-align: left;
+    }
+
+    .excel-table th {
+        background: var(--bg-tertiary);
+        position: sticky;
+        top: 0;
+        z-index: 10;
+    }
+
+    .excel-table tr:hover {
+        background: var(--bg-tertiary);
+    }
+
+    /* Database data styles */
+    .data-section {
+        margin-bottom: 1.5rem;
+    }
+
+    .data-section h4 {
+        font-size: 0.875rem;
+        font-weight: 600;
+        color: var(--text-secondary);
+        margin-bottom: 0.75rem;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+    }
+
+    .metadata-grid {
+        display: grid;
+        grid-template-columns: auto 1fr;
+        gap: 0.5rem;
+        font-size: 0.75rem;
+        margin-bottom: 1rem;
+    }
+
+    .metadata-label {
+        color: var(--text-secondary);
+        font-weight: 500;
+    }
+
+    .metadata-value {
+        color: var(--text-primary);
+    }
+
+    /* Validation styles */
+    .validation-rule {
+        padding: 0.75rem;
+        background: var(--bg-tertiary);
+        border-radius: 0.375rem;
+        margin-bottom: 0.5rem;
+        display: flex;
+        align-items: flex-start;
+        gap: 0.75rem;
+    }
+
+    .validation-rule.passed {
+        border-left: 3px solid var(--success);
+    }
+
+    .validation-rule.failed {
+        border-left: 3px solid var(--danger);
+    }
+
+    .validation-rule.warning {
+        border-left: 3px solid var(--warning);
+    }
+
+    .validation-icon {
+        font-size: 1.25rem;
+        font-weight: bold;
+        flex-shrink: 0;
+    }
+
+    .validation-icon.passed {
+        color: var(--success);
+    }
+
+    .validation-icon.failed {
+        color: var(--danger);
+    }
+
+    .validation-icon.warning {
+        color: var(--warning);
+    }
+
+    .validation-details {
+        flex: 1;
+    }
+
+    .validation-name {
+        font-weight: 600;
+        font-size: 0.875rem;
+        color: var(--text-primary);
+        margin-bottom: 0.25rem;
+    }
+
+    .validation-errors {
+        margin-top: 0.5rem;
+    }
+
+    .validation-error-item {
+        font-size: 0.75rem;
+        color: var(--text-secondary);
+        padding: 0.5rem;
+        background: var(--bg-primary);
+        border-radius: 0.25rem;
+        margin-bottom: 0.25rem;
+    }
+
+    /* Navigation controls */
+    .navigation-controls {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 1rem;
+        margin-bottom: 1rem;
+        padding: 1rem;
+        background: var(--bg-secondary);
+        border: 1px solid var(--border);
+        border-radius: 0.5rem;
+    }
+
+    .nav-buttons {
+        display: flex;
+        gap: 0.5rem;
+    }
+
+    .file-position {
+        color: var(--text-secondary);
+        font-size: 0.875rem;
+        font-weight: 500;
+    }
+
+    .current-file-name {
+        color: var(--text-primary);
+        font-size: 0.875rem;
+        font-weight: 600;
+    }
+
+    /* Loading states */
+    .loading {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        height: 200px;
+        color: var(--text-secondary);
+        font-size: 0.875rem;
+    }
+
+    .error-message {
+        color: var(--danger);
+        padding: 1rem;
+        background: rgba(239, 68, 68, 0.1);
+        border-radius: 0.375rem;
+        border: 1px solid rgba(239, 68, 68, 0.2);
+        font-size: 0.875rem;
+    }
+
+    .empty-state {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        height: 200px;
+        color: var(--text-secondary);
+        font-size: 0.875rem;
+        text-align: center;
+    }
+
+    /* Scrollbar styling */
+    .panel-content::-webkit-scrollbar {
+        width: 8px;
+        height: 8px;
+    }
+
+    .panel-content::-webkit-scrollbar-track {
+        background: var(--bg-primary);
+    }
+
+    .panel-content::-webkit-scrollbar-thumb {
+        background: var(--border-light);
+        border-radius: 4px;
+    }
+
+    .panel-content::-webkit-scrollbar-thumb:hover {
+        background: var(--text-muted);
+    }
+
+    /* Sheet tabs for Excel viewer */
+    .sheet-tabs {
+        display: flex;
+        gap: 0.25rem;
+        padding: 0.5rem;
+        border-bottom: 1px solid var(--border);
+        background: var(--bg-primary);
+        overflow-x: auto;
+    }
+
+    .sheet-tab {
+        padding: 0.5rem 1rem;
+        background: var(--bg-tertiary);
+        border-radius: 0.25rem;
+        cursor: pointer;
+        font-size: 0.75rem;
+        white-space: nowrap;
+        transition: all 0.2s;
+        border: 1px solid transparent;
+    }
+
+    .sheet-tab:hover {
+        background: var(--border-light);
+    }
+
+    .sheet-tab.active {
+        background: var(--accent);
+        color: white;
+        border-color: var(--accent);
+    }
+
+    /* Responsive adjustments */
+    @media (max-width: 1400px) {
+        .debug-container {
+            flex-direction: column;
+            height: auto;
+        }
+
+        .panel {
+            min-height: 400px;
+        }
+    }
+
+    /* Delete confirmation modal */
+    .modal {
+        display: none;
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background: rgba(0, 0, 0, 0.75);
+        z-index: 1000;
+        align-items: center;
+        justify-content: center;
+    }
+
+    .modal.active {
+        display: flex;
+    }
+
+    .modal-content {
+        background: var(--bg-secondary);
+        border: 1px solid var(--border);
+        border-radius: 0.5rem;
+        padding: 2rem;
+        max-width: 500px;
+        width: 90%;
+    }
+
+    .modal-header {
+        font-size: 1.25rem;
+        font-weight: 700;
+        color: var(--text-primary);
+        margin-bottom: 1rem;
+    }
+
+    .modal-body {
+        color: var(--text-secondary);
+        margin-bottom: 1.5rem;
+        font-size: 0.875rem;
+    }
+
+    .modal-actions {
+        display: flex;
+        gap: 0.5rem;
+        justify-content: flex-end;
+    }
+
+    .compact-table {
+        font-size: 0.75rem;
+    }
+
+    .compact-table td {
+        padding: 0.5rem;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<h2>Debug Files - Operations Dashboard</h2>
+<p class="text-secondary mb-3">Review pay files with Excel data, database records, and validation results side-by-side</p>
+
+<!-- Navigation Controls -->
+<div class="navigation-controls">
+    <div class="nav-buttons">
+        <button id="prevBtn" class="btn btn-secondary" disabled>Previous</button>
+        <button id="nextBtn" class="btn btn-secondary" disabled>Next</button>
+    </div>
+    <div>
+        <div class="file-position" id="filePosition">Loading files...</div>
+        <div class="current-file-name" id="currentFileName"></div>
+    </div>
+    <div class="nav-buttons">
+        <button id="deleteBtn" class="btn btn-danger" disabled>Delete File</button>
+    </div>
+</div>
+
+<!-- Three-Panel Layout -->
+<div class="debug-container">
+    <!-- Panel 1: XLS File Viewer -->
+    <div class="panel">
+        <div class="panel-header">
+            <span>XLS File Viewer</span>
+            <span class="badge badge-info" id="xlsBadge">Loading...</span>
+        </div>
+        <div id="sheetTabs" class="sheet-tabs" style="display: none;"></div>
+        <div class="panel-content" id="xlsContent">
+            <div class="loading">
+                <div class="spinner"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Panel 2: Database Data -->
+    <div class="panel">
+        <div class="panel-header">
+            <span>Database Data</span>
+            <span class="badge badge-info" id="dbBadge">Loading...</span>
+        </div>
+        <div class="panel-content" id="dbContent">
+            <div class="loading">
+                <div class="spinner"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Panel 3: Validation Results -->
+    <div class="panel">
+        <div class="panel-header">
+            <span>Validation Results</span>
+            <span class="badge badge-info" id="validationBadge">Loading...</span>
+        </div>
+        <div class="panel-content" id="validationContent">
+            <div class="loading">
+                <div class="spinner"></div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Delete Confirmation Modal -->
+<div class="modal" id="deleteModal">
+    <div class="modal-content">
+        <div class="modal-header">Confirm Delete</div>
+        <div class="modal-body">
+            Are you sure you want to delete this file and all associated data?
+            <br><br>
+            This will permanently remove:
+            <ul style="margin-top: 0.5rem;">
+                <li>S3 file</li>
+                <li>File metadata</li>
+                <li>All pay records</li>
+                <li>All validation errors and warnings</li>
+            </ul>
+            <br>
+            <strong>This action cannot be undone.</strong>
+        </div>
+        <div class="modal-actions">
+            <button class="btn btn-secondary" onclick="closeDeleteModal()">Cancel</button>
+            <button class="btn btn-danger" onclick="confirmDelete()">Delete</button>
+        </div>
+    </div>
+</div>
+
+<script>
+// Global state
+let allFiles = [];
+let currentIndex = 0;
+let currentFileId = null;
+let currentSheets = {};
+let activeSheet = null;
+
+// Load files on page load
+document.addEventListener('DOMContentLoaded', function() {
+    loadFilesList();
+});
+
+// Load list of all files
+async function loadFilesList() {
+    try {
+        const response = await fetch('/api/files/list');
+        const data = await response.json();
+
+        if (data.error) {
+            showError('Failed to load files: ' + data.error);
+            return;
+        }
+
+        allFiles = data.files || [];
+
+        if (allFiles.length === 0) {
+            showEmptyState();
+            return;
+        }
+
+        // Load first file
+        currentIndex = 0;
+        loadFile(allFiles[currentIndex].file_id);
+        updateNavigationState();
+    } catch (error) {
+        console.error('Error loading files:', error);
+        showError('Failed to load files: ' + error.message);
+    }
+}
+
+// Load a specific file
+async function loadFile(fileId) {
+    currentFileId = fileId;
+
+    // Reset all panels
+    document.getElementById('xlsContent').innerHTML = '<div class="loading"><div class="spinner"></div></div>';
+    document.getElementById('dbContent').innerHTML = '<div class="loading"><div class="spinner"></div></div>';
+    document.getElementById('validationContent').innerHTML = '<div class="loading"><div class="spinner"></div></div>';
+
+    // Update file name
+    const file = allFiles[currentIndex];
+    document.getElementById('currentFileName').textContent = file.filename;
+
+    // Load all three panels in parallel
+    await Promise.all([
+        loadXlsData(fileId),
+        loadDatabaseData(fileId),
+        loadValidationData(fileId)
+    ]);
+}
+
+// Load XLS file data
+async function loadXlsData(fileId) {
+    try {
+        const response = await fetch(`/api/files/${fileId}/xls`);
+        const data = await response.json();
+
+        if (data.error) {
+            document.getElementById('xlsContent').innerHTML =
+                `<div class="error-message">${data.error}</div>`;
+            document.getElementById('xlsBadge').textContent = 'Error';
+            document.getElementById('xlsBadge').className = 'badge badge-danger';
+            return;
+        }
+
+        currentSheets = data.sheets;
+        const sheetNames = Object.keys(currentSheets);
+
+        if (sheetNames.length === 0) {
+            document.getElementById('xlsContent').innerHTML =
+                '<div class="empty-state">No sheets found in file</div>';
+            return;
+        }
+
+        // Create sheet tabs if multiple sheets
+        if (sheetNames.length > 1) {
+            const tabsHtml = sheetNames.map(name =>
+                `<div class="sheet-tab" onclick="switchSheet('${name}')">${name}</div>`
+            ).join('');
+            document.getElementById('sheetTabs').innerHTML = tabsHtml;
+            document.getElementById('sheetTabs').style.display = 'flex';
+        } else {
+            document.getElementById('sheetTabs').style.display = 'none';
+        }
+
+        // Display first sheet
+        activeSheet = sheetNames[0];
+        displaySheet(activeSheet);
+
+        document.getElementById('xlsBadge').textContent = `${sheetNames.length} sheet(s)`;
+        document.getElementById('xlsBadge').className = 'badge badge-success';
+    } catch (error) {
+        console.error('Error loading XLS data:', error);
+        document.getElementById('xlsContent').innerHTML =
+            `<div class="error-message">Error: ${error.message}</div>`;
+        document.getElementById('xlsBadge').textContent = 'Error';
+        document.getElementById('xlsBadge').className = 'badge badge-danger';
+    }
+}
+
+// Switch between Excel sheets
+function switchSheet(sheetName) {
+    activeSheet = sheetName;
+    displaySheet(sheetName);
+
+    // Update active tab
+    const tabs = document.querySelectorAll('.sheet-tab');
+    tabs.forEach(tab => {
+        if (tab.textContent === sheetName) {
+            tab.classList.add('active');
+        } else {
+            tab.classList.remove('active');
+        }
+    });
+}
+
+// Display Excel sheet as table
+function displaySheet(sheetName) {
+    const sheetData = currentSheets[sheetName];
+
+    if (!sheetData || sheetData.length === 0) {
+        document.getElementById('xlsContent').innerHTML =
+            '<div class="empty-state">Sheet is empty</div>';
+        return;
+    }
+
+    // Create table HTML
+    let html = '<table class="excel-table"><thead><tr>';
+
+    // Header row
+    const headers = sheetData[0];
+    headers.forEach(header => {
+        html += `<th>${header || ''}</th>`;
+    });
+    html += '</tr></thead><tbody>';
+
+    // Data rows
+    for (let i = 1; i < sheetData.length; i++) {
+        html += '<tr>';
+        sheetData[i].forEach(cell => {
+            html += `<td>${cell !== null && cell !== undefined ? cell : ''}</td>`;
+        });
+        html += '</tr>';
+    }
+
+    html += '</tbody></table>';
+    document.getElementById('xlsContent').innerHTML = html;
+}
+
+// Load database data
+async function loadDatabaseData(fileId) {
+    try {
+        const response = await fetch(`/api/files/${fileId}/database`);
+        const data = await response.json();
+
+        if (data.error) {
+            document.getElementById('dbContent').innerHTML =
+                `<div class="error-message">${data.error}</div>`;
+            document.getElementById('dbBadge').textContent = 'Error';
+            document.getElementById('dbBadge').className = 'badge badge-danger';
+            return;
+        }
+
+        let html = '';
+
+        // File Metadata Section
+        html += '<div class="data-section">';
+        html += '<h4>File Metadata</h4>';
+        html += '<div class="metadata-grid">';
+
+        const metadata = data.file_metadata;
+        const metadataFields = [
+            ['File ID', metadata.FileID],
+            ['Filename', metadata.OriginalFilename],
+            ['Status', metadata.Status],
+            ['Umbrella', metadata.UmbrellaCode],
+            ['Uploaded', new Date(metadata.UploadedAt).toLocaleString()],
+            ['Valid Records', metadata.ValidRecords],
+            ['Total Errors', metadata.TotalErrors || 0],
+            ['Total Warnings', metadata.TotalWarnings || 0]
+        ];
+
+        metadataFields.forEach(([label, value]) => {
+            html += `<div class="metadata-label">${label}:</div>`;
+            html += `<div class="metadata-value">${value || 'N/A'}</div>`;
+        });
+
+        html += '</div></div>';
+
+        // Pay Records Section
+        html += '<div class="data-section">';
+        html += `<h4>Pay Records (${data.pay_records_count})</h4>`;
+
+        if (data.pay_records.length > 0) {
+            html += '<div style="overflow-x: auto;"><table class="table-container compact-table"><thead><tr>';
+            html += '<th>Row</th><th>Employee ID</th><th>Name</th><th>Type</th><th>Days</th><th>Rate</th><th>Amount</th>';
+            html += '</tr></thead><tbody>';
+
+            data.pay_records.forEach(record => {
+                html += '<tr>';
+                html += `<td>${record.RowNumber || 'N/A'}</td>`;
+                html += `<td>${record.EmployeeID || 'N/A'}</td>`;
+                html += `<td>${record.ContractorName || 'N/A'}</td>`;
+                html += `<td>${record.RecordType || 'NORMAL'}</td>`;
+                html += `<td>${record.TotalDays || 0}</td>`;
+                html += `<td>£${(record.DayRate || 0).toFixed(2)}</td>`;
+                html += `<td>£${(record.TotalAmount || 0).toFixed(2)}</td>`;
+                html += '</tr>';
+            });
+
+            html += '</tbody></table></div>';
+        } else {
+            html += '<div class="empty-state">No pay records found</div>';
+        }
+
+        html += '</div>';
+
+        // Validation Errors Section
+        if (data.validation_errors.length > 0) {
+            html += '<div class="data-section">';
+            html += `<h4>Validation Errors (${data.validation_errors.length})</h4>`;
+
+            data.validation_errors.forEach(error => {
+                html += `<div class="validation-error-item">`;
+                html += `<strong>Row ${error.RowNumber}:</strong> ${error.ErrorMessage}`;
+                html += `</div>`;
+            });
+
+            html += '</div>';
+        }
+
+        document.getElementById('dbContent').innerHTML = html;
+        document.getElementById('dbBadge').textContent = `${data.pay_records_count} records`;
+        document.getElementById('dbBadge').className = 'badge badge-success';
+    } catch (error) {
+        console.error('Error loading database data:', error);
+        document.getElementById('dbContent').innerHTML =
+            `<div class="error-message">Error: ${error.message}</div>`;
+        document.getElementById('dbBadge').textContent = 'Error';
+        document.getElementById('dbBadge').className = 'badge badge-danger';
+    }
+}
+
+// Load validation data
+async function loadValidationData(fileId) {
+    try {
+        const response = await fetch(`/api/files/${fileId}/validation`);
+        const data = await response.json();
+
+        if (data.error) {
+            document.getElementById('validationContent').innerHTML =
+                `<div class="error-message">${data.error}</div>`;
+            document.getElementById('validationBadge').textContent = 'Error';
+            document.getElementById('validationBadge').className = 'badge badge-danger';
+            return;
+        }
+
+        let html = '';
+
+        // Overall status
+        html += '<div class="data-section">';
+        html += '<h4>Overall Status</h4>';
+        html += '<div class="metadata-grid">';
+        html += `<div class="metadata-label">File Status:</div>`;
+        html += `<div class="metadata-value"><span class="badge badge-${data.file_status === 'COMPLETED' ? 'success' : 'warning'}">${data.file_status}</span></div>`;
+        html += `<div class="metadata-label">Total Errors:</div>`;
+        html += `<div class="metadata-value">${data.total_errors}</div>`;
+        html += `<div class="metadata-label">Total Warnings:</div>`;
+        html += `<div class="metadata-value">${data.total_warnings}</div>`;
+        html += '</div></div>';
+
+        // Validation Rules
+        html += '<div class="data-section">';
+        html += '<h4>Validation Rules</h4>';
+
+        data.validation_rules.forEach(rule => {
+            const status = rule.passed ? 'passed' : 'failed';
+            const icon = rule.passed ? '✓' : '✗';
+
+            html += `<div class="validation-rule ${status}">`;
+            html += `<div class="validation-icon ${status}">${icon}</div>`;
+            html += `<div class="validation-details">`;
+            html += `<div class="validation-name">${rule.name}</div>`;
+
+            if (!rule.passed && rule.errors.length > 0) {
+                html += '<div class="validation-errors">';
+                rule.errors.forEach(error => {
+                    html += `<div class="validation-error-item">`;
+                    html += `Row ${error.row}: ${error.message}`;
+                    html += `</div>`;
+                });
+                html += '</div>';
+            }
+
+            html += `</div></div>`;
+        });
+
+        html += '</div>';
+
+        // Warnings
+        if (data.warnings.length > 0) {
+            html += '<div class="data-section">';
+            html += '<h4>Warnings</h4>';
+
+            data.warnings.forEach(warning => {
+                html += `<div class="validation-rule warning">`;
+                html += `<div class="validation-icon warning">⚠</div>`;
+                html += `<div class="validation-details">`;
+                html += `<div class="validation-name">${warning.name}</div>`;
+                html += `<div class="validation-error-item">`;
+                html += `Row ${warning.row}: ${warning.message}`;
+                if (warning.auto_resolved) {
+                    html += ` <span class="badge badge-success">Auto-resolved</span>`;
+                }
+                html += `</div>`;
+                html += `</div></div>`;
+            });
+
+            html += '</div>';
+        }
+
+        document.getElementById('validationContent').innerHTML = html;
+
+        if (data.has_errors) {
+            document.getElementById('validationBadge').textContent = `${data.total_errors} errors`;
+            document.getElementById('validationBadge').className = 'badge badge-danger';
+        } else if (data.has_warnings) {
+            document.getElementById('validationBadge').textContent = `${data.total_warnings} warnings`;
+            document.getElementById('validationBadge').className = 'badge badge-warning';
+        } else {
+            document.getElementById('validationBadge').textContent = 'All passed';
+            document.getElementById('validationBadge').className = 'badge badge-success';
+        }
+    } catch (error) {
+        console.error('Error loading validation data:', error);
+        document.getElementById('validationContent').innerHTML =
+            `<div class="error-message">Error: ${error.message}</div>`;
+        document.getElementById('validationBadge').textContent = 'Error';
+        document.getElementById('validationBadge').className = 'badge badge-danger';
+    }
+}
+
+// Navigation functions
+document.getElementById('prevBtn').addEventListener('click', function() {
+    if (currentIndex > 0) {
+        currentIndex--;
+        loadFile(allFiles[currentIndex].file_id);
+        updateNavigationState();
+    }
+});
+
+document.getElementById('nextBtn').addEventListener('click', function() {
+    if (currentIndex < allFiles.length - 1) {
+        currentIndex++;
+        loadFile(allFiles[currentIndex].file_id);
+        updateNavigationState();
+    }
+});
+
+function updateNavigationState() {
+    document.getElementById('prevBtn').disabled = currentIndex === 0;
+    document.getElementById('nextBtn').disabled = currentIndex === allFiles.length - 1;
+    document.getElementById('deleteBtn').disabled = allFiles.length === 0;
+
+    if (allFiles.length > 0) {
+        document.getElementById('filePosition').textContent =
+            `File ${currentIndex + 1} of ${allFiles.length}`;
+    } else {
+        document.getElementById('filePosition').textContent = 'No files available';
+    }
+}
+
+// Delete functions
+document.getElementById('deleteBtn').addEventListener('click', function() {
+    document.getElementById('deleteModal').classList.add('active');
+});
+
+function closeDeleteModal() {
+    document.getElementById('deleteModal').classList.remove('active');
+}
+
+async function confirmDelete() {
+    if (!currentFileId) return;
+
+    try {
+        const response = await fetch(`/api/file/${currentFileId}`, {
+            method: 'DELETE'
+        });
+
+        const data = await response.json();
+
+        if (data.error) {
+            alert('Error deleting file: ' + data.error);
+            return;
+        }
+
+        // Remove from files list
+        allFiles.splice(currentIndex, 1);
+
+        // Close modal
+        closeDeleteModal();
+
+        // Load next file or show empty state
+        if (allFiles.length === 0) {
+            showEmptyState();
+        } else {
+            // Adjust index if we deleted the last file
+            if (currentIndex >= allFiles.length) {
+                currentIndex = allFiles.length - 1;
+            }
+            loadFile(allFiles[currentIndex].file_id);
+            updateNavigationState();
+        }
+
+        // Show success message
+        alert('File deleted successfully');
+    } catch (error) {
+        console.error('Error deleting file:', error);
+        alert('Error deleting file: ' + error.message);
+    }
+}
+
+// Utility functions
+function showEmptyState() {
+    const emptyHtml = '<div class="empty-state">No files available<br><br>Upload files from the Upload page</div>';
+    document.getElementById('xlsContent').innerHTML = emptyHtml;
+    document.getElementById('dbContent').innerHTML = emptyHtml;
+    document.getElementById('validationContent').innerHTML = emptyHtml;
+
+    document.getElementById('xlsBadge').textContent = 'No files';
+    document.getElementById('dbBadge').textContent = 'No files';
+    document.getElementById('validationBadge').textContent = 'No files';
+
+    document.getElementById('filePosition').textContent = 'No files available';
+    document.getElementById('currentFileName').textContent = '';
+
+    updateNavigationState();
+}
+
+function showError(message) {
+    const errorHtml = `<div class="error-message">${message}</div>`;
+    document.getElementById('xlsContent').innerHTML = errorHtml;
+    document.getElementById('dbContent').innerHTML = errorHtml;
+    document.getElementById('validationContent').innerHTML = errorHtml;
+}
+</script>
+{% endblock %}

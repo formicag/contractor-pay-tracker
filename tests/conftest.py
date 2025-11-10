@@ -35,19 +35,6 @@ def mock_dynamodb_client():
 
     mock_client.get_system_parameter = mock_get_system_parameter
 
-    # Mock permanent staff check
-    permanent_staff = [
-        ('Syed', 'Syed'),
-        ('Victor', 'Cheung'),
-        ('Gareth', 'Jones'),
-        ('Martin', 'Alabone')
-    ]
-
-    def mock_check_permanent_staff(first_name, last_name):
-        return (first_name, last_name) in permanent_staff
-
-    mock_client.check_permanent_staff = mock_check_permanent_staff
-
     return mock_client
 
 

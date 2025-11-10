@@ -86,7 +86,8 @@ class ValidationEngine:
         record: Dict,
         umbrella_id: str,
         period_data: Dict,
-        contractors_cache: Dict = None
+        contractors_cache: Dict = None,
+        rates_cache: Dict = None
     ) -> Tuple[bool, List[Dict], List[Dict]]:
         """
         Validate a single pay record
@@ -111,22 +112,8 @@ class ValidationEngine:
         warnings = []
         print("[VALIDATE_RECORD] Initialized warnings list: []")
 
-        # Rule 1: Check if permanent staff (CRITICAL)
-        print("[VALIDATE_RECORD] Rule 1: Calling check_permanent_staff()")
-        perm_result = self.check_permanent_staff(record)
-        print(f"[VALIDATE_RECORD] check_permanent_staff returned: {perm_result}")
-
-        if not perm_result['valid']:
-            print("[VALIDATE_RECORD] Permanent staff check failed (valid=False)")
-            errors.append(perm_result['error'])
-            print(f"[VALIDATE_RECORD] Added error to errors list. Errors count: {len(errors)}")
-            print("[VALIDATE_RECORD] Returning early due to permanent staff error")
-            return False, errors, warnings  # Stop validation immediately
-        else:
-            print("[VALIDATE_RECORD] Permanent staff check passed (valid=True)")
-
-        # Rule 2: Find and validate contractor
-        print("[VALIDATE_RECORD] Rule 2: Calling find_contractor()")
+        # Rule 1: Find and validate contractor
+        print("[VALIDATE_RECORD] Rule 1: Calling find_contractor()")
         contractor_result = self.find_contractor(record, contractors_cache)
         print(f"[VALIDATE_RECORD] find_contractor returned: {contractor_result}")
 
@@ -171,41 +158,54 @@ class ValidationEngine:
         else:
             print("[VALIDATE_RECORD] Umbrella association validation passed (valid=True)")
 
-        # Rule 4: Validate VAT calculation (CRITICAL)
-        print("[VALIDATE_RECORD] Rule 4: Calling validate_vat()")
-        vat_result = self.validate_vat(record)
-        print(f"[VALIDATE_RECORD] validate_vat returned: {vat_result}")
+        # Rule 4: Validate VAT calculation (CRITICAL) - skip for expense records
+        print("[VALIDATE_RECORD] Rule 4: Checking if VAT validation needed")
+        record_type = record.get('record_type')
 
-        if not vat_result['valid']:
-            print("[VALIDATE_RECORD] VAT validation failed (valid=False)")
-            errors.append(vat_result['error'])
-            print(f"[VALIDATE_RECORD] Added error to errors list. Errors count: {len(errors)}")
-            print("[VALIDATE_RECORD] Not returning - collecting all errors")
+        if record_type != 'EXPENSE':
+            print("[VALIDATE_RECORD] Record type is not EXPENSE, calling validate_vat()")
+            vat_result = self.validate_vat(record)
+            print(f"[VALIDATE_RECORD] validate_vat returned: {vat_result}")
+
+            if not vat_result['valid']:
+                print("[VALIDATE_RECORD] VAT validation failed (valid=False)")
+                errors.append(vat_result['error'])
+                print(f"[VALIDATE_RECORD] Added error to errors list. Errors count: {len(errors)}")
+                print("[VALIDATE_RECORD] Not returning - collecting all errors")
+            else:
+                print("[VALIDATE_RECORD] VAT validation passed (valid=True)")
         else:
-            print("[VALIDATE_RECORD] VAT validation passed (valid=True)")
+            print("[VALIDATE_RECORD] Record type is EXPENSE, skipping VAT validation")
 
         # Rule 5: Validate overtime rate if applicable (CRITICAL)
-        print(f"[VALIDATE_RECORD] Rule 5: Checking if record_type is OVERTIME")
-        record_type = record.get('record_type')
-        print(f"[VALIDATE_RECORD] record_type: {record_type}")
+        # DISABLED: Overtime rate validation disabled per user request
+        # print(f"[VALIDATE_RECORD] Rule 5: Checking if record_type is OVERTIME")
+        # record_type = record.get('record_type')
+        # print(f"[VALIDATE_RECORD] record_type: {record_type}")
 
-        if record_type == 'OVERTIME':
-            print("[VALIDATE_RECORD] record_type is OVERTIME, calling validate_overtime_rate()")
-            overtime_result = self.validate_overtime_rate(
-                record,
-                contractor_id,
-                period_data
-            )
-            print(f"[VALIDATE_RECORD] validate_overtime_rate returned: {overtime_result}")
+        # if record_type == 'OVERTIME':
+        #     print("[VALIDATE_RECORD] record_type is OVERTIME, calling validate_overtime_rate()")
+        #     overtime_result = self.validate_overtime_rate(
+        #         record,
+        #         contractor_id,
+        #         period_data,
+        #         rates_cache
+        #     )
+        #     print(f"[VALIDATE_RECORD] validate_overtime_rate returned: {overtime_result}")
 
-            if not overtime_result['valid']:
-                print("[VALIDATE_RECORD] Overtime validation failed (valid=False)")
-                errors.append(overtime_result['error'])
-                print(f"[VALIDATE_RECORD] Added error to errors list. Errors count: {len(errors)}")
-            else:
-                print("[VALIDATE_RECORD] Overtime validation passed (valid=True)")
-        else:
-            print("[VALIDATE_RECORD] record_type is not OVERTIME, skipping overtime validation")
+        #     if not overtime_result['valid']:
+        #         print("[VALIDATE_RECORD] Overtime validation failed (valid=False)")
+        #         errors.append(overtime_result['error'])
+        #         print(f"[VALIDATE_RECORD] Added error to errors list. Errors count: {len(errors)}")
+        #     else:
+        #         print("[VALIDATE_RECORD] Overtime validation passed (valid=True)")
+        #         if 'warning' in overtime_result:
+        #             print("[VALIDATE_RECORD] Overtime validation has warning, adding to warnings list")
+        #             warnings.append(overtime_result['warning'])
+        #             print(f"[VALIDATE_RECORD] Added warning to warnings list. Warnings count: {len(warnings)}")
+        # else:
+        #     print("[VALIDATE_RECORD] record_type is not OVERTIME, skipping overtime validation")
+        print("[VALIDATE_RECORD] Rule 5: Overtime rate validation DISABLED")
 
         # Rule 6: Check rate changes (WARNING)
         print("[VALIDATE_RECORD] Rule 6: Checking for rate changes")
@@ -251,50 +251,9 @@ class ValidationEngine:
         print(f"[VALIDATE_RECORD] Final result: is_valid={is_valid}, errors_count={len(errors)}, warnings_count={len(warnings)}")
         return is_valid, errors, warnings
 
-    def check_permanent_staff(self, record: Dict) -> Dict:
-        """
-        Rule 1: Check if person is permanent staff
-        CRITICAL error if found - Gemini improvement #2
-        """
-        print("[CHECK_PERMANENT_STAFF] Starting check_permanent_staff()")
-
-        first_name = record['forename']
-        print(f"[CHECK_PERMANENT_STAFF] Extracted first_name: {first_name}")
-
-        last_name = record['surname']
-        print(f"[CHECK_PERMANENT_STAFF] Extracted last_name: {last_name}")
-
-        print(f"[CHECK_PERMANENT_STAFF] Calling db.check_permanent_staff({first_name}, {last_name})")
-        is_permanent = self.db.check_permanent_staff(first_name, last_name)
-        print(f"[CHECK_PERMANENT_STAFF] check_permanent_staff returned: {is_permanent}")
-
-        if is_permanent:
-            print("[CHECK_PERMANENT_STAFF] Person is permanent staff - generating error response")
-            full_name = f"{first_name} {last_name}"
-            print(f"[CHECK_PERMANENT_STAFF] Full name: {full_name}")
-
-            error_dict = {
-                'valid': False,
-                'severity': 'CRITICAL',
-                'error': {
-                    'error_type': 'PERMANENT_STAFF',
-                    'severity': 'CRITICAL',
-                    'row_number': record.get('row_number'),
-                    'employee_id': record.get('employee_id'),
-                    'contractor_name': full_name,
-                    'error_message': f"CRITICAL: {full_name} is permanent staff and must NOT appear in contractor pay files",
-                    'suggested_fix': f"Remove {full_name} from this file - they should be paid via payroll, not umbrella company"
-                }
-            }
-            print(f"[CHECK_PERMANENT_STAFF] Returning error dict: {error_dict}")
-            return error_dict
-
-        print("[CHECK_PERMANENT_STAFF] Person is not permanent staff - returning valid=True")
-        return {'valid': True}
-
     def find_contractor(self, record: Dict, contractors_cache: Dict = None) -> Dict:
         """
-        Rule 2: Find contractor using fuzzy matching
+        Rule 1: Find contractor using fuzzy matching
         CRITICAL if not found after fuzzy match
         WARNING if fuzzy matched (confidence < 100%)
         """
@@ -410,6 +369,8 @@ class ValidationEngine:
         Checks:
         - Contractor has association with this umbrella
         - Association is valid for this period (ValidFrom/ValidTo dates)
+
+        Note: umbrella_id can be either shortcode (e.g., 'CLARITY') or UUID
         """
         print("[VALIDATE_UMBRELLA_ASSOCIATION] Starting validate_umbrella_association()")
         print(f"[VALIDATE_UMBRELLA_ASSOCIATION] contractor_id={contractor_id}, umbrella_id={umbrella_id}")
@@ -417,6 +378,29 @@ class ValidationEngine:
         if not contractor_id:
             print("[VALIDATE_UMBRELLA_ASSOCIATION] contractor_id is empty - returning error")
             return {'valid': False, 'error': {'error_type': 'NO_CONTRACTOR_ID'}}
+
+        # Convert shortcode to UUID if needed
+        actual_umbrella_id = umbrella_id
+        if '-' not in umbrella_id:  # It's a shortcode, not a UUID
+            print(f"[VALIDATE_UMBRELLA_ASSOCIATION] umbrella_id looks like shortcode, looking up UUID")
+            umbrella_record = self.db.get_umbrella_by_code(umbrella_id)
+            if umbrella_record:
+                actual_umbrella_id = umbrella_record.get('UmbrellaID')
+                print(f"[VALIDATE_UMBRELLA_ASSOCIATION] Converted shortcode '{umbrella_id}' to UUID '{actual_umbrella_id}'")
+            else:
+                print(f"[VALIDATE_UMBRELLA_ASSOCIATION] Could not find umbrella with shortcode '{umbrella_id}'")
+                return {
+                    'valid': False,
+                    'error': {
+                        'error_type': 'UMBRELLA_NOT_FOUND',
+                        'severity': 'CRITICAL',
+                        'umbrella_code': umbrella_id,
+                        'error_message': f"CRITICAL: Umbrella company '{umbrella_id}' not found in system",
+                        'suggested_fix': f"Verify umbrella company code '{umbrella_id}' exists in the system"
+                    }
+                }
+
+        print(f"[VALIDATE_UMBRELLA_ASSOCIATION] Using umbrella_id: {actual_umbrella_id}")
 
         # Get all associations for contractor
         print(f"[VALIDATE_UMBRELLA_ASSOCIATION] Calling db.get_contractor_umbrella_associations({contractor_id})")
@@ -439,8 +423,8 @@ class ValidationEngine:
             assoc_umbrella_id = assoc.get('UmbrellaID')
             print(f"[VALIDATE_UMBRELLA_ASSOCIATION] Association UmbrellaID: {assoc_umbrella_id}")
 
-            if assoc_umbrella_id != umbrella_id:
-                print(f"[VALIDATE_UMBRELLA_ASSOCIATION] UmbrellaID mismatch ({assoc_umbrella_id} != {umbrella_id}), skipping")
+            if assoc_umbrella_id != actual_umbrella_id:
+                print(f"[VALIDATE_UMBRELLA_ASSOCIATION] UmbrellaID mismatch ({assoc_umbrella_id} != {actual_umbrella_id}), skipping")
                 continue
 
             print("[VALIDATE_UMBRELLA_ASSOCIATION] UmbrellaID matches, checking date validity")
@@ -547,7 +531,8 @@ class ValidationEngine:
         self,
         record: Dict,
         contractor_id: str,
-        period_data: Dict
+        period_data: Dict,
+        rates_cache: Dict = None
     ) -> Dict:
         """
         Rule 5: Validate overtime rate is 1.5x normal rate
@@ -585,14 +570,21 @@ class ValidationEngine:
         tolerance_percent = Decimal(str(tolerance_percent_value))
         print(f"[VALIDATE_OVERTIME_RATE] Converted tolerance_percent to Decimal: {tolerance_percent}")
 
-        # Lookup contractor's normal rate from current period
-        print("[VALIDATE_OVERTIME_RATE] About to execute: Query contractor's normal rate for current period")
-        period_id = str(period_data.get('PeriodNumber'))
-        print(f"[VALIDATE_OVERTIME_RATE] period_id={period_id}")
+        # Check current batch first (rates_cache)
+        normal_rate = None
+        if rates_cache and contractor_id in rates_cache:
+            normal_rate = rates_cache[contractor_id]
+            print(f"[VALIDATE_OVERTIME_RATE] Found normal_rate in current batch: {normal_rate}")
 
-        print(f"[VALIDATE_OVERTIME_RATE] About to execute: db.get_contractor_rate_in_period({contractor_id}, {period_id})")
-        normal_rate = self.db.get_contractor_rate_in_period(contractor_id, period_id)
-        print(f"[VALIDATE_OVERTIME_RATE] Retrieved normal_rate from current period: {normal_rate}")
+        # If not in current batch, lookup contractor's normal rate from database
+        if not normal_rate:
+            print("[VALIDATE_OVERTIME_RATE] About to execute: Query contractor's normal rate for current period")
+            period_id = str(period_data.get('PeriodNumber'))
+            print(f"[VALIDATE_OVERTIME_RATE] period_id={period_id}")
+
+            print(f"[VALIDATE_OVERTIME_RATE] About to execute: db.get_contractor_rate_in_period({contractor_id}, {period_id})")
+            normal_rate = self.db.get_contractor_rate_in_period(contractor_id, period_id)
+            print(f"[VALIDATE_OVERTIME_RATE] Retrieved normal_rate from current period: {normal_rate}")
 
         # If not found in current period, try to get from recent pay history
         if not normal_rate:
@@ -611,20 +603,20 @@ class ValidationEngine:
         # If we still don't have normal rate, we cannot validate
         if not normal_rate:
             print("[VALIDATE_OVERTIME_RATE] Cannot validate overtime rate - no normal rate found in system")
-            print("[VALIDATE_OVERTIME_RATE] Returning error - unable to determine normal rate")
-            error_dict = {
-                'valid': False,
-                'error': {
-                    'error_type': 'INVALID_OVERTIME_RATE',
-                    'severity': 'CRITICAL',
+            print("[VALIDATE_OVERTIME_RATE] Returning WARNING - unable to determine normal rate")
+            warning_dict = {
+                'valid': True,
+                'warning': {
+                    'warning_type': 'INVALID_OVERTIME_RATE',
+                    'severity': 'WARNING',
                     'row_number': record.get('row_number'),
                     'employee_id': record.get('employee_id'),
-                    'error_message': f"CRITICAL: Cannot validate overtime rate £{overtime_rate:.2f} - no normal rate found for contractor in system",
-                    'suggested_fix': "Verify contractor has a STANDARD record in this period or previous periods, or verify overtime rate manually"
+                    'warning_message': f"WARNING: Cannot validate overtime rate £{overtime_rate:.2f} - no normal rate found for contractor in system",
+                    'suggested_action': "Verify contractor has a STANDARD record in this period or previous periods, or verify overtime rate manually"
                 }
             }
-            print(f"[VALIDATE_OVERTIME_RATE] Returning error: {error_dict}")
-            return error_dict
+            print(f"[VALIDATE_OVERTIME_RATE] Returning warning: {warning_dict}")
+            return warning_dict
 
         print("[VALIDATE_OVERTIME_RATE] About to execute: Convert normal_rate to Decimal for calculation")
         normal_rate = Decimal(str(normal_rate))

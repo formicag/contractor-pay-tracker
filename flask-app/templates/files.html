@@ -4,82 +4,215 @@
 
 {% block extra_css %}
 <style>
-    .filters {
-        margin-bottom: 20px;
+    /* Umbrella Group Sections */
+    .umbrella-group {
+        background: var(--bg-secondary);
+        border: 1px solid var(--border);
+        border-radius: 0.5rem;
+        margin-bottom: 1rem;
+        overflow: hidden;
+    }
+
+    .umbrella-header {
         display: flex;
-        gap: 15px;
+        justify-content: space-between;
         align-items: center;
+        padding: 1rem 1.25rem;
+        cursor: pointer;
+        user-select: none;
+        transition: background 0.2s ease;
     }
 
-    .filters select {
-        padding: 8px 12px;
-        border: 1px solid #ddd;
-        border-radius: 4px;
-        font-size: 14px;
+    .umbrella-header:hover {
+        background: var(--bg-tertiary);
     }
 
-    .file-actions {
+    .umbrella-title {
         display: flex;
-        gap: 10px;
+        align-items: center;
+        gap: 0.75rem;
     }
 
-    .file-actions button {
-        padding: 6px 12px;
-        font-size: 12px;
+    .umbrella-name {
+        font-size: 1.125rem;
+        font-weight: 600;
+        color: var(--text-primary);
     }
 
+    .file-count-badge {
+        background: var(--bg-tertiary);
+        padding: 0.25rem 0.75rem;
+        border-radius: 9999px;
+        font-size: 0.75rem;
+        color: var(--text-secondary);
+        font-weight: 600;
+    }
+
+    .chevron {
+        transition: transform 0.2s ease;
+        color: var(--text-secondary);
+    }
+
+    .chevron.expanded {
+        transform: rotate(180deg);
+    }
+
+    .umbrella-content {
+        max-height: 0;
+        overflow: hidden;
+        transition: max-height 0.3s ease;
+    }
+
+    .umbrella-content.expanded {
+        max-height: 5000px;
+    }
+
+    .umbrella-table {
+        border-top: 1px solid var(--border);
+    }
+
+    /* Filter Bar */
+    .filter-bar {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        flex-wrap: wrap;
+        gap: 1rem;
+        margin-bottom: 1.5rem;
+    }
+
+    .filter-left {
+        display: flex;
+        gap: 1rem;
+        align-items: center;
+        flex-wrap: wrap;
+    }
+
+    .filter-select {
+        background: var(--bg-secondary);
+        border: 1px solid var(--border);
+        color: var(--text-primary);
+        padding: 0.5rem 1rem;
+        border-radius: 0.5rem;
+        font-size: 0.875rem;
+        cursor: pointer;
+        transition: all 0.2s ease;
+    }
+
+    .filter-select:hover {
+        border-color: var(--accent);
+    }
+
+    .filter-select:focus {
+        outline: none;
+        border-color: var(--accent);
+        box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+    }
+
+    /* Search Box */
+    .search-box {
+        background: var(--bg-secondary);
+        border: 1px solid var(--border);
+        color: var(--text-primary);
+        padding: 0.5rem 1rem;
+        border-radius: 0.5rem;
+        font-size: 0.875rem;
+        min-width: 250px;
+    }
+
+    .search-box:focus {
+        outline: none;
+        border-color: var(--accent);
+        box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+    }
+
+    /* Empty State */
     .empty-state {
         text-align: center;
-        padding: 60px 20px;
-        color: #999;
+        padding: 4rem 2rem;
+        background: var(--bg-secondary);
+        border-radius: 0.5rem;
+        border: 1px solid var(--border);
     }
 
-    .empty-state-icon {
-        font-size: 64px;
-        margin-bottom: 20px;
+    .empty-icon {
+        font-size: 4rem;
+        margin-bottom: 1rem;
+        opacity: 0.5;
+    }
+
+    .empty-state h3 {
+        font-size: 1.25rem;
+        font-weight: 600;
+        color: var(--text-primary);
+        margin-bottom: 0.5rem;
+    }
+
+    .empty-state p {
+        color: var(--text-secondary);
+        margin-bottom: 1.5rem;
     }
 </style>
 {% endblock %}
 
 {% block content %}
-<h2>Uploaded Files</h2>
+<h2>File Management</h2>
 
-<div class="filters">
-    <label>
-        <strong>Filter by status:</strong>
-        <select id="status-filter" onchange="filterFiles()">
-            <option value="all">All Files</option>
-            <option value="COMPLETED">Completed</option>
-            <option value="COMPLETED_WITH_WARNINGS">Completed with Warnings</option>
-            <option value="ERROR">Errors</option>
-            <option value="PROCESSING">Processing</option>
-        </select>
-    </label>
-
-    <label>
-        <strong>Filter by umbrella:</strong>
-        <select id="umbrella-filter" onchange="filterFiles()">
-            <option value="all">All Umbrellas</option>
-            <option value="NASA">NASA</option>
-            <option value="PARASOL">PARASOL</option>
-            <option value="GIANT">GIANT</option>
-            <option value="PAYSTREAM">PAYSTREAM</option>
-            <option value="BROOKSON">BROOKSON</option>
-            <option value="APSCO">APSCo</option>
-        </select>
-    </label>
-
-    <button class="btn" onclick="loadFiles()">Refresh</button>
+<!-- Summary Cards -->
+<div class="summary-grid" id="summary-cards">
+    <div class="card">
+        <div class="card-header">Total Files</div>
+        <div class="card-value" id="total-files">0</div>
+        <div class="card-subtitle">Across all umbrellas</div>
+    </div>
+    <div class="card">
+        <div class="card-header">Completed</div>
+        <div class="card-value" style="color: var(--success);" id="completed-files">0</div>
+        <div class="card-subtitle">Successfully processed</div>
+    </div>
+    <div class="card">
+        <div class="card-header">With Warnings</div>
+        <div class="card-value" style="color: var(--warning);" id="warning-files">0</div>
+        <div class="card-subtitle">Need review</div>
+    </div>
+    <div class="card">
+        <div class="card-header">Failed</div>
+        <div class="card-value" style="color: var(--danger);" id="error-files">0</div>
+        <div class="card-subtitle">Processing errors</div>
+    </div>
 </div>
 
+<!-- Filter Bar -->
+<div class="filter-bar">
+    <div class="filter-left">
+        <input type="text" class="search-box" id="search-box" placeholder="Search files..." onkeyup="filterFiles()">
+        <select class="filter-select" id="status-filter" onchange="filterFiles()">
+            <option value="all">All Status</option>
+            <option value="COMPLETED">Completed</option>
+            <option value="COMPLETED_WITH_WARNINGS">With Warnings</option>
+            <option value="FAILED">Failed</option>
+            <option value="PROCESSING">Processing</option>
+            <option value="UPLOADED">Uploaded</option>
+        </select>
+    </div>
+    <div style="display: flex; gap: 0.5rem;">
+        <button class="btn-secondary btn" onclick="toggleAllGroups()">
+            <span id="toggle-text">Expand All</span>
+        </button>
+        <button class="btn" onclick="loadFiles()">↻ Refresh</button>
+    </div>
+</div>
+
+<!-- Files Container -->
 <div id="files-container">
-    <p>Loading files...</p>
+    <div class="spinner"></div>
 </div>
 {% endblock %}
 
 {% block extra_js %}
 <script>
     let allFiles = [];
+    let expandedGroups = new Set();
 
     // Load files on page load
     window.addEventListener('DOMContentLoaded', () => {
@@ -88,111 +221,203 @@
 
     async function loadFiles() {
         const container = document.getElementById('files-container');
-        container.innerHTML = '<p>Loading files...</p>';
+        container.innerHTML = '<div class="spinner"></div>';
 
         try {
             const response = await fetch('/api/files');
             const data = await response.json();
 
-            allFiles = data.files;
-            displayFiles(allFiles);
+            allFiles = data.files || [];
+            updateSummaryCards();
+            displayFilesGrouped(allFiles);
         } catch (error) {
-            container.innerHTML = '<p class="alert alert-error">Failed to load files: ' + error.message + '</p>';
+            container.innerHTML = '<div class="alert alert-danger">Failed to load files: ' + error.message + '</div>';
         }
     }
 
-    function displayFiles(files) {
+    function updateSummaryCards() {
+        document.getElementById('total-files').textContent = allFiles.length;
+
+        const completed = allFiles.filter(f => f.status === 'COMPLETED').length;
+        const warnings = allFiles.filter(f => f.status === 'COMPLETED_WITH_WARNINGS').length;
+        const errors = allFiles.filter(f => f.status === 'FAILED' || f.status === 'ERROR').length;
+
+        document.getElementById('completed-files').textContent = completed;
+        document.getElementById('warning-files').textContent = warnings;
+        document.getElementById('error-files').textContent = errors;
+    }
+
+    function displayFilesGrouped(files) {
         const container = document.getElementById('files-container');
 
         if (files.length === 0) {
             container.innerHTML = `
                 <div class="empty-state">
-                    <div class="empty-state-icon">📄</div>
+                    <div class="empty-icon">📄</div>
                     <h3>No files found</h3>
                     <p>Upload your first contractor pay file to get started</p>
-                    <a href="/upload" class="btn btn-success" style="margin-top: 20px;">Upload File</a>
+                    <a href="/upload" class="btn">Upload File</a>
                 </div>
             `;
             return;
         }
 
-        let html = `
-            <table>
-                <thead>
-                    <tr>
-                        <th>Filename</th>
-                        <th>Umbrella</th>
-                        <th>Period</th>
-                        <th>Status</th>
-                        <th>Records</th>
-                        <th>Uploaded</th>
-                        <th>Actions</th>
-                    </tr>
-                </thead>
-                <tbody>
-        `;
-
+        // Group files by umbrella
+        const grouped = {};
         files.forEach(file => {
-            const statusBadge = getStatusBadge(file.status);
-            const uploadedDate = new Date(file.uploaded_at).toLocaleString();
-
-            html += `
-                <tr>
-                    <td><strong>${file.filename}</strong></td>
-                    <td>${file.umbrella}</td>
-                    <td>Period ${file.period}</td>
-                    <td>${statusBadge}</td>
-                    <td>${file.records || 0}${file.warnings ? ` (${file.warnings} warnings)` : ''}</td>
-                    <td>${uploadedDate}</td>
-                    <td>
-                        <div class="file-actions">
-                            <a href="/file/${file.file_id}" class="btn">View</a>
-                            <button class="btn btn-danger" onclick="deleteFile('${file.file_id}', '${file.filename}')">Delete</button>
-                        </div>
-                    </td>
-                </tr>
-            `;
+            const umbrella = file.umbrella || 'Unknown';
+            if (!grouped[umbrella]) {
+                grouped[umbrella] = [];
+            }
+            grouped[umbrella].push(file);
         });
 
-        html += `
-                </tbody>
-            </table>
-        `;
+        // Sort each group by uploaded date (newest first)
+        Object.keys(grouped).forEach(umbrella => {
+            grouped[umbrella].sort((a, b) => new Date(b.uploaded_at) - new Date(a.uploaded_at));
+        });
+
+        // Sort umbrellas alphabetically
+        const sortedUmbrellas = Object.keys(grouped).sort();
+
+        let html = '';
+        sortedUmbrellas.forEach(umbrella => {
+            const umbrellaFiles = grouped[umbrella];
+            const isExpanded = expandedGroups.has(umbrella);
+
+            html += `
+                <div class="umbrella-group">
+                    <div class="umbrella-header" onclick="toggleGroup('${umbrella}')">
+                        <div class="umbrella-title">
+                            <span class="umbrella-name">${umbrella}</span>
+                            <span class="file-count-badge">${umbrellaFiles.length} files</span>
+                        </div>
+                        <span class="chevron ${isExpanded ? 'expanded' : ''}">▼</span>
+                    </div>
+                    <div class="umbrella-content ${isExpanded ? 'expanded' : ''}" id="group-${umbrella}">
+                        <div class="table-container umbrella-table">
+                            <table>
+                                <thead>
+                                    <tr>
+                                        <th>Filename</th>
+                                        <th>Period</th>
+                                        <th>Status</th>
+                                        <th>Records</th>
+                                        <th>Uploaded</th>
+                                        <th>Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+            `;
+
+            umbrellaFiles.forEach(file => {
+                const statusBadge = getStatusBadge(file.status);
+                const uploadedDate = new Date(file.uploaded_at).toLocaleDateString('en-GB', {
+                    day: 'numeric',
+                    month: 'short',
+                    year: 'numeric',
+                    hour: '2-digit',
+                    minute: '2-digit'
+                });
+
+                html += `
+                    <tr>
+                        <td><strong>${file.filename}</strong></td>
+                        <td>${file.period}</td>
+                        <td>${statusBadge}</td>
+                        <td>${file.records || 0}${file.warnings ? ` <span class="text-warning">(${file.warnings} warnings)</span>` : ''}</td>
+                        <td class="text-secondary">${uploadedDate}</td>
+                        <td>
+                            <div style="display: flex; gap: 0.5rem;">
+                                <a href="/file/${file.file_id}" class="btn btn-secondary" style="font-size: 0.75rem; padding: 0.375rem 0.75rem;">View</a>
+                                <button class="btn-danger btn" style="font-size: 0.75rem; padding: 0.375rem 0.75rem;" onclick="deleteFile('${file.file_id}', '${file.filename}')">Delete</button>
+                            </div>
+                        </td>
+                    </tr>
+                `;
+            });
+
+            html += `
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            `;
+        });
 
         container.innerHTML = html;
     }
 
-    function getStatusBadge(status) {
-        const badges = {
-            'COMPLETED': '<span class="badge badge-success">Completed</span>',
-            'COMPLETED_WITH_WARNINGS': '<span class="badge badge-warning">Completed (Warnings)</span>',
-            'ERROR': '<span class="badge badge-error">Error</span>',
-            'PROCESSING': '<span class="badge" style="background: #d1ecf1; color: #0c5460;">Processing</span>',
-            'UPLOADED': '<span class="badge" style="background: #e2e3e5; color: #383d41;">Uploaded</span>'
-        };
+    function toggleGroup(umbrella) {
+        const content = document.getElementById('group-' + umbrella);
+        const chevron = content.previousElementSibling.querySelector('.chevron');
 
-        return badges[status] || status;
+        if (expandedGroups.has(umbrella)) {
+            expandedGroups.delete(umbrella);
+            content.classList.remove('expanded');
+            chevron.classList.remove('expanded');
+        } else {
+            expandedGroups.add(umbrella);
+            content.classList.add('expanded');
+            chevron.classList.add('expanded');
+        }
+    }
+
+    function toggleAllGroups() {
+        const allUmbrellas = [...new Set(allFiles.map(f => f.umbrella || 'Unknown'))];
+        const toggleText = document.getElementById('toggle-text');
+
+        if (expandedGroups.size === allUmbrellas.length) {
+            // Collapse all
+            expandedGroups.clear();
+            toggleText.textContent = 'Expand All';
+        } else {
+            // Expand all
+            allUmbrellas.forEach(u => expandedGroups.add(u));
+            toggleText.textContent = 'Collapse All';
+        }
+
+        displayFilesGrouped(allFiles);
     }
 
     function filterFiles() {
+        const searchTerm = document.getElementById('search-box').value.toLowerCase();
         const statusFilter = document.getElementById('status-filter').value;
-        const umbrellaFilter = document.getElementById('umbrella-filter').value;
 
         let filtered = allFiles;
+
+        if (searchTerm) {
+            filtered = filtered.filter(f =>
+                f.filename.toLowerCase().includes(searchTerm) ||
+                f.umbrella.toLowerCase().includes(searchTerm) ||
+                (f.period && f.period.toLowerCase().includes(searchTerm))
+            );
+        }
 
         if (statusFilter !== 'all') {
             filtered = filtered.filter(f => f.status === statusFilter);
         }
 
-        if (umbrellaFilter !== 'all') {
-            filtered = filtered.filter(f => f.umbrella === umbrellaFilter);
-        }
+        displayFilesGrouped(filtered);
+    }
 
-        displayFiles(filtered);
+    function getStatusBadge(status) {
+        const badges = {
+            'COMPLETED': '<span class="badge badge-success">Completed</span>',
+            'COMPLETED_WITH_WARNINGS': '<span class="badge badge-warning">With Warnings</span>',
+            'FAILED': '<span class="badge badge-error">Failed</span>',
+            'ERROR': '<span class="badge badge-error">Error</span>',
+            'UPLOADED': '<span class="badge badge-info">Uploaded</span>',
+            'PROCESSING': '<span class="badge badge-warning">Processing</span>',
+            'PENDING': '<span class="badge badge-info">Pending</span>'
+        };
+
+        return badges[status] || `<span class="badge">${status}</span>`;
     }
 
     async function deleteFile(fileId, filename) {
-        if (!confirm(`Are you sure you want to delete "${filename}"?\n\nThis will mark the file as deleted and deactivate all associated records.`)) {
+        if (!confirm(`Delete "${filename}"?`)) {
             return;
         }
 
@@ -202,8 +427,7 @@
             });
 
             if (response.ok) {
-                alert('File deleted successfully');
-                loadFiles(); // Reload the list
+                loadFiles();
             } else {
                 const error = await response.json();
                 alert('Delete failed: ' + (error.error || 'Unknown error'));

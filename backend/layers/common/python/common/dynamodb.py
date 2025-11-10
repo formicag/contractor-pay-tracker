@@ -88,35 +88,6 @@ class DynamoDBClient:
         print(f"[GET_CONTRACTOR_UMBRELLA_ASSOC] Returning {len(items)} items")
         return items
 
-    def check_permanent_staff(self, first_name, last_name):
-        """Check if person is permanent staff (should NOT be in contractor files)"""
-        print(f"[CHECK_PERMANENT_STAFF] Called with first_name={first_name}, last_name={last_name}")
-
-        normalized_name = f"{first_name} {last_name}".lower()
-        print(f"[CHECK_PERMANENT_STAFF] Normalized name: {normalized_name}")
-
-        pk_value = f'PERMANENT#{normalized_name}'
-        sk_value = 'PROFILE'
-        print(f"[CHECK_PERMANENT_STAFF] Generated key: PK={pk_value}, SK={sk_value}")
-
-        try:
-            print(f"[CHECK_PERMANENT_STAFF] Attempting get_item query")
-            response = self.table.get_item(
-                Key={
-                    'PK': pk_value,
-                    'SK': sk_value
-                }
-            )
-            print(f"[CHECK_PERMANENT_STAFF] get_item response: {response}")
-
-            is_permanent = 'Item' in response
-            print(f"[CHECK_PERMANENT_STAFF] Is permanent staff: {is_permanent}")
-            return is_permanent
-        except Exception as e:
-            print(f"[CHECK_PERMANENT_STAFF] Exception caught: {type(e).__name__}: {str(e)}")
-            print(f"[CHECK_PERMANENT_STAFF] Returning False due to exception")
-            return False
-
     def get_system_parameter(self, param_key):
         """Get system configuration parameter"""
         print(f"[GET_SYSTEM_PARAMETER] Called with param_key={param_key}")
@@ -143,6 +114,32 @@ class DynamoDBClient:
 
         print(f"[GET_SYSTEM_PARAMETER] No item found, returning None")
         return None
+
+    def get_umbrella_by_code(self, short_code):
+        """Get umbrella company by short code (e.g., 'CLARITY')"""
+        print(f"[GET_UMBRELLA_BY_CODE] Called with short_code={short_code}")
+
+        try:
+            print(f"[GET_UMBRELLA_BY_CODE] Querying GSI2 with KeyConditionExpression")
+            response = self.table.query(
+                IndexName='GSI2',
+                KeyConditionExpression=Key('GSI2PK').eq(f'UMBRELLA_CODE#{short_code}')
+            )
+            print(f"[GET_UMBRELLA_BY_CODE] Query response: {response}")
+
+            items = response.get('Items', [])
+            print(f"[GET_UMBRELLA_BY_CODE] Found {len(items)} items")
+
+            if items:
+                umbrella = items[0]
+                print(f"[GET_UMBRELLA_BY_CODE] Returning umbrella: {umbrella}")
+                return umbrella
+            else:
+                print(f"[GET_UMBRELLA_BY_CODE] No umbrella found for shortcode {short_code}")
+                return None
+        except Exception as e:
+            print(f"[GET_UMBRELLA_BY_CODE] Exception: {type(e).__name__}: {str(e)}")
+            return None
 
     def create_file_metadata(self, file_data):
         """Create pay file metadata record"""
@@ -258,7 +255,7 @@ class DynamoDBClient:
                 ':pk': gsi1pk_value,
                 ':sk_prefix': 'RECORD#',
                 ':is_active': True,
-                ':record_type': 'STANDARD'
+                ':record_type': 'NORMAL'
             },
             ScanIndexForward=False,  # Sort descending (most recent first)
             Limit=limit
@@ -297,7 +294,7 @@ class DynamoDBClient:
                 ':pk': gsi2pk_value,
                 ':sk': gsi2sk_value,
                 ':is_active': True,
-                ':record_type': 'STANDARD'
+                ':record_type': 'NORMAL'
             },
             Limit=1
         )
@@ -314,5 +311,88 @@ class DynamoDBClient:
 
         print(f"[GET_CONTRACTOR_RATE_IN_PERIOD] No rate found, returning None")
         return None
+
+    def get_validation_snapshots(self, file_id):
+        """
+        Get all validation snapshots for a file
+
+        Args:
+            file_id: File ID
+
+        Returns:
+            List of validation snapshot records sorted by timestamp descending
+        """
+        print(f"[GET_VALIDATION_SNAPSHOTS] Called with file_id={file_id}")
+
+        pk_value = f'FILE#{file_id}'
+        sk_prefix = 'VALIDATION#'
+        print(f"[GET_VALIDATION_SNAPSHOTS] Generated PK={pk_value}, SK prefix={sk_prefix}")
+
+        print(f"[GET_VALIDATION_SNAPSHOTS] Querying table with KeyConditionExpression")
+        response = self.table.query(
+            KeyConditionExpression='PK = :pk AND begins_with(SK, :sk)',
+            ExpressionAttributeValues={
+                ':pk': pk_value,
+                ':sk': sk_prefix
+            },
+            ScanIndexForward=False  # Sort descending (most recent first)
+        )
+        print(f"[GET_VALIDATION_SNAPSHOTS] Query response: {response}")
+
+        items = response.get('Items', [])
+        print(f"[GET_VALIDATION_SNAPSHOTS] Extracted {len(items)} items from response")
+        print(f"[GET_VALIDATION_SNAPSHOTS] Returning items: {items}")
+        return items
+
+    def get_latest_validation_snapshot(self, file_id):
+        """
+        Get the most recent validation snapshot for a file
+
+        Args:
+            file_id: File ID
+
+        Returns:
+            Most recent validation snapshot record or None
+        """
+        print(f"[GET_LATEST_VALIDATION_SNAPSHOT] Called with file_id={file_id}")
+
+        snapshots = self.get_validation_snapshots(file_id)
+
+        if snapshots:
+            latest = snapshots[0]
+            print(f"[GET_LATEST_VALIDATION_SNAPSHOT] Returning latest snapshot: {latest}")
+            return latest
+
+        print(f"[GET_LATEST_VALIDATION_SNAPSHOT] No snapshots found, returning None")
+        return None
+
+    def query_all_validation_snapshots(self, limit=100):
+        """
+        Query all validation snapshots across all files
+
+        Args:
+            limit: Maximum number of snapshots to return
+
+        Returns:
+            List of validation snapshots sorted by timestamp descending
+        """
+        print(f"[QUERY_ALL_VALIDATION_SNAPSHOTS] Called with limit={limit}")
+
+        print(f"[QUERY_ALL_VALIDATION_SNAPSHOTS] Querying GSI1 with KeyConditionExpression")
+        response = self.table.query(
+            IndexName='GSI1',
+            KeyConditionExpression='GSI1PK = :pk',
+            ExpressionAttributeValues={
+                ':pk': 'VALIDATIONS'
+            },
+            ScanIndexForward=False,  # Sort descending (most recent first)
+            Limit=limit
+        )
+        print(f"[QUERY_ALL_VALIDATION_SNAPSHOTS] Query response: {response}")
+
+        items = response.get('Items', [])
+        print(f"[QUERY_ALL_VALIDATION_SNAPSHOTS] Extracted {len(items)} items from response")
+        print(f"[QUERY_ALL_VALIDATION_SNAPSHOTS] Returning items")
+        return items
 
 print("[DYNAMODB_MODULE] dynamodb.py module load complete")

@@ -422,17 +422,10 @@ resource "aws_lambda_permission" "s3_trigger" {
   source_arn    = aws_s3_bucket.pay_files.arn
 }
 
-# S3 Notification
+# S3 EventBridge Notification (replaces Lambda notification for SQS architecture)
 resource "aws_s3_bucket_notification" "bucket_notification" {
-  bucket = aws_s3_bucket.pay_files.id
-
-  lambda_function {
-    lambda_function_arn = aws_lambda_function.file_upload_handler.arn
-    events              = ["s3:ObjectCreated:*"]
-    filter_suffix       = ".xlsx"
-  }
-
-  depends_on = [aws_lambda_permission.s3_trigger]
+  bucket      = aws_s3_bucket.pay_files.id
+  eventbridge = true
 }
 
 # Data sources

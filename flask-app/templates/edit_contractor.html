@@ -1,0 +1,274 @@
+{% extends "base.html" %}
+
+{% block title %}Edit Contractor - {{ app_name }}{% endblock %}
+
+{% block extra_css %}
+<style>
+    .form-container {
+        max-width: 800px;
+        margin: 0 auto;
+    }
+
+    .form-group {
+        margin-bottom: 1.5rem;
+    }
+
+    .form-group label {
+        display: block;
+        font-size: 0.875rem;
+        font-weight: 600;
+        color: var(--text-primary);
+        margin-bottom: 0.5rem;
+    }
+
+    .form-group input,
+    .form-group select {
+        width: 100%;
+        background: var(--bg-tertiary);
+        border: 1px solid var(--border);
+        color: var(--text-primary);
+        padding: 0.75rem 1rem;
+        border-radius: 0.5rem;
+        font-size: 0.875rem;
+        transition: all 0.2s ease;
+    }
+
+    .form-group input:focus,
+    .form-group select:focus {
+        outline: none;
+        border-color: var(--accent);
+        box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+    }
+
+    .form-group input:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+    }
+
+    .form-row {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 1rem;
+    }
+
+    .form-actions {
+        display: flex;
+        gap: 1rem;
+        margin-top: 2rem;
+        padding-top: 2rem;
+        border-top: 1px solid var(--border);
+    }
+
+    .info-box {
+        background: rgba(59, 130, 246, 0.1);
+        border: 1px solid rgba(59, 130, 246, 0.2);
+        border-radius: 0.5rem;
+        padding: 1rem;
+        margin-bottom: 1.5rem;
+        font-size: 0.875rem;
+        color: var(--text-primary);
+    }
+
+    .info-box strong {
+        color: var(--accent);
+    }
+
+    @media (max-width: 768px) {
+        .form-row {
+            grid-template-columns: 1fr;
+        }
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="form-container">
+    <h2>Edit Contractor</h2>
+
+    <div class="info-box">
+        <strong>Note:</strong> All changes will be tracked with full audit trail. A snapshot of the current state will be saved before applying your changes.
+    </div>
+
+    <div class="card">
+        <form id="edit-contractor-form">
+            <!-- Email (Read-only) -->
+            <div class="form-group">
+                <label for="email">Email (Primary Key)</label>
+                <input type="email" id="email" name="email" value="{{ contractor.email }}" disabled>
+            </div>
+
+            <!-- Basic Information -->
+            <div class="form-row">
+                <div class="form-group">
+                    <label for="title">Title</label>
+                    <select id="title" name="title" required>
+                        <option value="Mr" {% if contractor.title == 'Mr' %}selected{% endif %}>Mr</option>
+                        <option value="Ms" {% if contractor.title == 'Ms' %}selected{% endif %}>Ms</option>
+                        <option value="Mrs" {% if contractor.title == 'Mrs' %}selected{% endif %}>Mrs</option>
+                        <option value="Miss" {% if contractor.title == 'Miss' %}selected{% endif %}>Miss</option>
+                        <option value="Dr" {% if contractor.title == 'Dr' %}selected{% endif %}>Dr</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label for="first_name">First Name</label>
+                    <input type="text" id="first_name" name="first_name" value="{{ contractor.first_name }}" required>
+                </div>
+            </div>
+
+            <div class="form-row">
+                <div class="form-group">
+                    <label for="last_name">Last Name</label>
+                    <input type="text" id="last_name" name="last_name" value="{{ contractor.last_name }}" required>
+                </div>
+                <div class="form-group">
+                    <label for="job_title">Job Title</label>
+                    <input type="text" id="job_title" name="job_title" value="{{ contractor.job_title or '' }}">
+                </div>
+            </div>
+
+            <!-- Email Addresses -->
+            <div class="form-row">
+                <div class="form-group">
+                    <label for="resource_email">Resource Email</label>
+                    <input type="email" id="resource_email" name="resource_email" value="{{ contractor.resource_email or '' }}">
+                </div>
+                <div class="form-group">
+                    <label for="nasstar_email">Nasstar Email</label>
+                    <input type="email" id="nasstar_email" name="nasstar_email" value="{{ contractor.nasstar_email or '' }}">
+                </div>
+            </div>
+
+            <div class="form-group">
+                <label for="line_manager_email">Line Manager Email</label>
+                <input type="email" id="line_manager_email" name="line_manager_email" value="{{ contractor.line_manager_email or '' }}">
+            </div>
+
+            <!-- Rates -->
+            <div class="form-row">
+                <div class="form-group">
+                    <label for="sell_rate">Sell Rate (£/hour)</label>
+                    <input type="number" id="sell_rate" name="sell_rate" step="0.01" value="{{ contractor.sell_rate }}" required>
+                </div>
+                <div class="form-group">
+                    <label for="buy_rate">Buy Rate (£/hour)</label>
+                    <input type="number" id="buy_rate" name="buy_rate" step="0.01" value="{{ contractor.buy_rate }}" required>
+                </div>
+            </div>
+
+            <div class="form-group">
+                <label for="snow_unit_rate">SNOW Unit Rate (£/hour)</label>
+                <input type="number" id="snow_unit_rate" name="snow_unit_rate" step="0.01" value="{{ contractor.snow_unit_rate or '' }}">
+            </div>
+
+            <!-- Engagement Details -->
+            <div class="form-row">
+                <div class="form-group">
+                    <label for="engagement_type">Engagement Type</label>
+                    <input type="text" id="engagement_type" name="engagement_type" value="{{ contractor.engagement_type or '' }}">
+                </div>
+                <div class="form-group">
+                    <label for="customer">Customer</label>
+                    <input type="text" id="customer" name="customer" value="{{ contractor.customer or '' }}">
+                </div>
+            </div>
+
+            <div class="form-group">
+                <label for="snow_product">SNOW Product</label>
+                <input type="text" id="snow_product" name="snow_product" value="{{ contractor.snow_product or '' }}">
+            </div>
+
+            <!-- Status -->
+            <div class="form-group">
+                <label for="is_active">Status</label>
+                <select id="is_active" name="is_active" required>
+                    <option value="true" {% if contractor.is_active %}selected{% endif %}>Active</option>
+                    <option value="false" {% if not contractor.is_active %}selected{% endif %}>Inactive</option>
+                </select>
+            </div>
+
+            <!-- Form Actions -->
+            <div class="form-actions">
+                <button type="submit" class="btn btn-success">Save Changes</button>
+                <a href="{{ url_for('contractors') }}" class="btn btn-secondary">Cancel</a>
+            </div>
+        </form>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    document.getElementById('edit-contractor-form').addEventListener('submit', async (e) => {
+        e.preventDefault();
+
+        const form = e.target;
+        const submitBtn = form.querySelector('button[type="submit"]');
+        const originalBtnText = submitBtn.textContent;
+
+        // Validate rates before submitting
+        const sellRate = parseFloat(form.sell_rate.value);
+        const buyRate = parseFloat(form.buy_rate.value);
+
+        if (sellRate <= buyRate) {
+            alert(`ERROR: Sell Rate (£${sellRate.toFixed(2)}) must be greater than Buy Rate (£${buyRate.toFixed(2)}).\n\nMargin cannot be zero or negative. Please adjust the rates before saving.`);
+            return;
+        }
+
+        // Calculate and display margin for confirmation
+        const margin = sellRate - buyRate;
+        const marginPercent = ((margin / sellRate) * 100).toFixed(1);
+
+        if (!confirm(`Ready to save?\n\nSell Rate: £${sellRate.toFixed(2)}\nBuy Rate: £${buyRate.toFixed(2)}\nMargin: £${margin.toFixed(2)} (${marginPercent}%)\n\nClick OK to save changes.`)) {
+            return;
+        }
+
+        // Disable submit button
+        submitBtn.disabled = true;
+        submitBtn.textContent = 'Saving...';
+
+        // Collect form data
+        const formData = {
+            title: form.title.value,
+            first_name: form.first_name.value,
+            last_name: form.last_name.value,
+            job_title: form.job_title.value || null,
+            resource_email: form.resource_email.value || null,
+            nasstar_email: form.nasstar_email.value || null,
+            line_manager_email: form.line_manager_email.value || null,
+            sell_rate: sellRate,
+            buy_rate: buyRate,
+            snow_unit_rate: form.snow_unit_rate.value ? parseFloat(form.snow_unit_rate.value) : null,
+            engagement_type: form.engagement_type.value || null,
+            customer: form.customer.value || null,
+            snow_product: form.snow_product.value || null,
+            is_active: form.is_active.value === 'true'
+        };
+
+        try {
+            const email = '{{ contractor.email }}';
+            const response = await fetch(`/api/contractors/${encodeURIComponent(email)}`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify(formData)
+            });
+
+            const result = await response.json();
+
+            if (response.ok) {
+                alert('Contractor updated successfully! A snapshot has been created for audit trail.');
+                window.location.href = '{{ url_for("contractors") }}';
+            } else {
+                alert('Error: ' + (result.message || result.error || 'Failed to update contractor'));
+                submitBtn.disabled = false;
+                submitBtn.textContent = originalBtnText;
+            }
+        } catch (error) {
+            alert('Error: ' + error.message);
+            submitBtn.disabled = false;
+            submitBtn.textContent = originalBtnText;
+        }
+    });
+</script>
+{% endblock %}

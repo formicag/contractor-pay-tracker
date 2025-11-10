@@ -57,6 +57,26 @@ print("[FILE_PROCESSOR] About to execute: from urllib.parse import unquote_plus"
 from urllib.parse import unquote_plus
 print("[FILE_PROCESSOR] Result: unquote_plus imported from urllib.parse")
 
+print("[FILE_PROCESSOR] About to execute: from common.semantic_search import SemanticSearchEngine")
+try:
+    from common.semantic_search import SemanticSearchEngine
+    print("[FILE_PROCESSOR] Result: SemanticSearchEngine imported from common.semantic_search")
+    SEMANTIC_SEARCH_AVAILABLE = True
+except ImportError as e:
+    print(f"[FILE_PROCESSOR] Warning: SemanticSearchEngine not available: {e}")
+    SemanticSearchEngine = None
+    SEMANTIC_SEARCH_AVAILABLE = False
+
+print("[FILE_PROCESSOR] About to execute: from common.fuzzy_matcher import FuzzyMatcher")
+try:
+    from common.fuzzy_matcher import FuzzyMatcher
+    print("[FILE_PROCESSOR] Result: FuzzyMatcher imported from common.fuzzy_matcher")
+    FUZZY_MATCHER_AVAILABLE = True
+except ImportError as e:
+    print(f"[FILE_PROCESSOR] Warning: FuzzyMatcher not available: {e}")
+    FuzzyMatcher = None
+    FUZZY_MATCHER_AVAILABLE = False
+
 
 print("[FILE_PROCESSOR] About to execute: s3_client = boto3.client('s3')")
 s3_client = boto3.client('s3')
@@ -65,6 +85,22 @@ print(f"[FILE_PROCESSOR] Result: s3_client created = {s3_client}")
 print("[FILE_PROCESSOR] About to execute: dynamodb_client = DynamoDBClient()")
 dynamodb_client = DynamoDBClient()
 print(f"[FILE_PROCESSOR] Result: dynamodb_client created = {dynamodb_client}")
+
+print("[FILE_PROCESSOR] About to execute: Initialize semantic search engine")
+if SEMANTIC_SEARCH_AVAILABLE:
+    semantic_engine = SemanticSearchEngine(region_name='us-east-1')
+    print(f"[FILE_PROCESSOR] Result: semantic_engine created = {semantic_engine}")
+else:
+    semantic_engine = None
+    print("[FILE_PROCESSOR] Result: semantic_engine not available")
+
+print("[FILE_PROCESSOR] About to execute: Initialize fuzzy matcher")
+if FUZZY_MATCHER_AVAILABLE:
+    fuzzy_matcher = FuzzyMatcher(threshold=75)
+    print(f"[FILE_PROCESSOR] Result: fuzzy_matcher created = {fuzzy_matcher}")
+else:
+    fuzzy_matcher = None
+    print("[FILE_PROCESSOR] Result: fuzzy_matcher not available")
 
 
 def lambda_handler(event, context):
@@ -310,29 +346,106 @@ def match_period(event: dict, logger: StructuredLogger) -> dict:
                 print("[FILE_PROCESSOR] About to execute: raise ValueError for missing umbrella company - no fallback available")
                 raise ValueError("Could not determine umbrella company from filename or metadata, and no active umbrella companies found in database")
     else:
-        # Normal path: we have umbrella_code from filename
+        # HYBRID SEARCH: Exact → Semantic → Fuzzy
+        print(f"[FILE_PROCESSOR] Starting hybrid umbrella search for: {umbrella_code}")
 
-        # Query DynamoDB for umbrella
-        print(f"[FILE_PROCESSOR] About to execute: dynamodb_client.table.query for umbrella_code = {umbrella_code}")
+        # TIER 1: Exact match (case-insensitive)
+        print(f"[FILE_PROCESSOR] TIER 1: Exact match search for umbrella_code = {umbrella_code}")
+        umbrella_code_upper = umbrella_code.upper() if umbrella_code else None
+        print(f"[FILE_PROCESSOR] Normalized umbrella_code to uppercase: {umbrella_code_upper}")
         response = dynamodb_client.table.query(
-            IndexName='GSI2',
-            KeyConditionExpression='GSI2PK = :pk',
-            ExpressionAttributeValues={':pk': f'UMBRELLA_CODE#{umbrella_code}'}
+            IndexName='GSI1',
+            KeyConditionExpression='GSI1PK = :pk',
+            ExpressionAttributeValues={':pk': f'UMBRELLA_CODE#{umbrella_code_upper}'}
         )
-        print(f"[FILE_PROCESSOR] Result: query response = {response}")
+        print(f"[FILE_PROCESSOR] Result: exact match query response = {response}")
 
-        print("[FILE_PROCESSOR] About to execute: check if not response.get('Items')")
-        if not response.get('Items'):
-            print(f"[FILE_PROCESSOR] About to execute: raise ValueError for umbrella '{umbrella_code}' not found")
-            raise ValueError(f"Umbrella company with code '{umbrella_code}' not found in database. Available codes: NASA, ABTG, FERN, etc.")
+        if response.get('Items'):
+            umbrella = response['Items'][0]
+            umbrella_id = umbrella['UmbrellaID']
+            print(f"[FILE_PROCESSOR] TIER 1 SUCCESS: Exact match found - umbrella_id = {umbrella_id}")
+            logger.info("Umbrella matched", method="EXACT", umbrella_code=umbrella_code, umbrella_id=umbrella_id)
+        else:
+            # TIER 2: Semantic search
+            print(f"[FILE_PROCESSOR] TIER 1 FAILED: No exact match, trying TIER 2: Semantic search")
 
-        print("[FILE_PROCESSOR] About to execute: umbrella = response['Items'][0]")
-        umbrella = response['Items'][0]
-        print(f"[FILE_PROCESSOR] Result: umbrella = {umbrella}")
+            # Get all active umbrellas for semantic matching
+            print(f"[FILE_PROCESSOR] Scanning for all active umbrellas for semantic search")
+            all_umbrellas_response = dynamodb_client.table.scan(
+                FilterExpression='begins_with(PK, :prefix) AND SK = :sk AND IsActive = :active',
+                ExpressionAttributeValues={
+                    ':prefix': 'UMBRELLA#',
+                    ':sk': 'PROFILE',
+                    ':active': True
+                }
+            )
+            all_umbrellas = all_umbrellas_response.get('Items', [])
+            print(f"[FILE_PROCESSOR] Found {len(all_umbrellas)} active umbrellas for matching")
 
-        print("[FILE_PROCESSOR] About to execute: umbrella_id = umbrella['UmbrellaID']")
-        umbrella_id = umbrella['UmbrellaID']
-        print(f"[FILE_PROCESSOR] Result: umbrella_id = {umbrella_id}")
+            semantic_match = None
+            if semantic_engine and all_umbrellas:
+                print(f"[FILE_PROCESSOR] Attempting semantic search with {len(all_umbrellas)} umbrellas")
+                semantic_match = semantic_engine.find_best_umbrella_match(
+                    umbrella_code,
+                    all_umbrellas,
+                    threshold=0.85,
+                    use_semantic=True
+                )
+
+                if semantic_match:
+                    umbrella = semantic_match['umbrella']
+                    umbrella_id = umbrella['UmbrellaID']
+                    confidence = semantic_match.get('confidence', 0.0)
+                    similarity = semantic_match.get('similarity', 0.0)
+                    print(f"[FILE_PROCESSOR] TIER 2 SUCCESS: Semantic match found - umbrella_id = {umbrella_id}, confidence = {confidence:.4f}")
+                    logger.info("Umbrella matched",
+                        method="SEMANTIC",
+                        umbrella_code=umbrella_code,
+                        umbrella_id=umbrella_id,
+                        confidence=confidence,
+                        similarity=similarity,
+                        matched_name=umbrella.get('Name')
+                    )
+                else:
+                    print(f"[FILE_PROCESSOR] TIER 2 FAILED: No semantic match found")
+            else:
+                print(f"[FILE_PROCESSOR] TIER 2 SKIPPED: Semantic search not available or no umbrellas")
+
+            # TIER 3: Fuzzy fallback
+            if not semantic_match:
+                print(f"[FILE_PROCESSOR] TIER 2 FAILED: No semantic match, trying TIER 3: Fuzzy fallback")
+
+                if fuzzy_matcher and all_umbrellas:
+                    print(f"[FILE_PROCESSOR] Attempting fuzzy match with {len(all_umbrellas)} umbrellas")
+                    fuzzy_match = fuzzy_matcher.find_best_match(
+                        umbrella_code,
+                        all_umbrellas,
+                        name_field='Name'
+                    )
+
+                    if fuzzy_match:
+                        umbrella = fuzzy_match['contractor']  # FuzzyMatcher uses 'contractor' key
+                        umbrella_id = umbrella['UmbrellaID']
+                        confidence = fuzzy_match.get('confidence', 0)
+                        match_type = fuzzy_match.get('match_type', 'FUZZY')
+                        print(f"[FILE_PROCESSOR] TIER 3 SUCCESS: Fuzzy match found - umbrella_id = {umbrella_id}, confidence = {confidence}")
+                        logger.info("Umbrella matched",
+                            method=f"FUZZY_{match_type}",
+                            umbrella_code=umbrella_code,
+                            umbrella_id=umbrella_id,
+                            confidence=confidence,
+                            matched_name=umbrella.get('Name')
+                        )
+                    else:
+                        print(f"[FILE_PROCESSOR] TIER 3 FAILED: No fuzzy match found")
+                        raise ValueError(f"Umbrella company '{umbrella_code}' not found using exact, semantic, or fuzzy matching. Please check the umbrella code in the filename.")
+                else:
+                    print(f"[FILE_PROCESSOR] TIER 3 SKIPPED: Fuzzy matcher not available or no umbrellas")
+                    raise ValueError(f"Umbrella company with code '{umbrella_code}' not found in database. Available codes: NASA, ABTG, FERN, etc.")
+
+        # At this point, umbrella and umbrella_id should be set
+        umbrella_code = umbrella.get('UmbrellaCode', umbrella_code)
+        print(f"[FILE_PROCESSOR] Final umbrella resolved: umbrella_id = {umbrella_id}, umbrella_code = {umbrella_code}")
 
     # Determine period from submission date
     print("[FILE_PROCESSOR] About to execute: submission_date = metadata.get('submission_date')")
@@ -387,27 +500,34 @@ def match_period(event: dict, logger: StructuredLogger) -> dict:
     for period_item in response.get('Items', []):
         print(f"[FILE_PROCESSOR] About to execute: Check period {period_item.get('PeriodNumber')}")
 
+        period_submission_date = period_item.get('SubmissionDate')
         work_start_date = period_item.get('WorkStartDate')
-        print(f"[FILE_PROCESSOR] Result: work_start_date = {work_start_date}")
-
         work_end_date = period_item.get('WorkEndDate')
-        print(f"[FILE_PROCESSOR] Result: work_end_date = {work_end_date}")
 
-        print(f"[FILE_PROCESSOR] About to execute: Check if {submission_date_formatted} falls between {work_start_date} and {work_end_date}")
+        print(f"[FILE_PROCESSOR] Result: period_submission_date = {period_submission_date}, work_start = {work_start_date}, work_end = {work_end_date}")
 
+        # Try exact match on submission date first
+        if period_submission_date and period_submission_date == submission_date_formatted:
+            print(f"[FILE_PROCESSOR] Result: EXACT MATCH on SubmissionDate! Period {period_item.get('PeriodNumber')}")
+            period = period_item
+            period_number = period_item.get('PeriodNumber')
+            print(f"[FILE_PROCESSOR] Result: period_number = {period_number}")
+            break
+
+        # Fallback: Check if submission falls within work period (for backwards compatibility)
         if work_start_date and work_end_date:
-            print(f"[FILE_PROCESSOR] About to execute: Compare dates: {work_start_date} <= {submission_date_formatted} <= {work_end_date}")
+            print(f"[FILE_PROCESSOR] About to execute: Fallback check - dates: {work_start_date} <= {submission_date_formatted} <= {work_end_date}")
 
             if work_start_date <= submission_date_formatted <= work_end_date:
-                print(f"[FILE_PROCESSOR] Result: Match found! submission_date falls within period {period_item.get('PeriodNumber')}")
+                print(f"[FILE_PROCESSOR] Result: Match found! submission_date falls within work period {period_item.get('PeriodNumber')}")
                 period = period_item
                 period_number = period_item.get('PeriodNumber')
-                print(f"[FILE_PROCESSOR] Result: period_number = {period_number}, period = {period}")
+                print(f"[FILE_PROCESSOR] Result: period_number = {period_number}")
                 break
             else:
-                print(f"[FILE_PROCESSOR] Result: No match - submission_date outside range")
+                print(f"[FILE_PROCESSOR] Result: No match on this period")
         else:
-            print(f"[FILE_PROCESSOR] Result: Period {period_item.get('PeriodNumber')} missing WorkStartDate or WorkEndDate, skipping")
+            print(f"[FILE_PROCESSOR] Result: Period {period_item.get('PeriodNumber')} missing date fields, skipping")
 
     print("[FILE_PROCESSOR] About to execute: Check if matching period was found")
     if not period or period_number is None:
@@ -610,6 +730,10 @@ def parse_records(event: dict, logger: StructuredLogger) -> dict:
         print("[FILE_PROCESSOR] Error: umbrella_id not found in event['period']")
         raise ValueError("Missing umbrella_id in period data")
 
+    print("[FILE_PROCESSOR] About to execute: umbrella_code = event.get('period', {}).get('umbrella_code') or event.get('umbrella_code')")
+    umbrella_code = event.get('period', {}).get('umbrella_code') or event.get('umbrella_code')
+    print(f"[FILE_PROCESSOR] Result: umbrella_code = {umbrella_code}")
+
     print("[FILE_PROCESSOR] About to execute: period_id = event.get('period', {}).get('period_id')")
     period_id = event.get('period', {}).get('period_id')
     print(f"[FILE_PROCESSOR] Result: period_id = {period_id}")
@@ -675,14 +799,15 @@ def parse_records(event: dict, logger: StructuredLogger) -> dict:
     timestamp = datetime.utcnow().isoformat() + 'Z'
     print(f"[FILE_PROCESSOR] Result: timestamp = {timestamp}")
 
-    print(f"[FILE_PROCESSOR] About to execute: dynamodb_client.update_file_status({file_id}, 'PROCESSING', TotalRecords={len(records)}, ProcessingStartedAt={timestamp})")
+    print(f"[FILE_PROCESSOR] About to execute: dynamodb_client.update_file_status({file_id}, 'PROCESSING', TotalRecords={len(records)}, ProcessingStartedAt={timestamp}, UmbrellaCode={umbrella_code})")
     dynamodb_client.update_file_status(
         file_id,
         'PROCESSING',
         TotalRecords=len(records),
-        ProcessingStartedAt=timestamp
+        ProcessingStartedAt=timestamp,
+        UmbrellaCode=umbrella_code
     )
-    print(f"[FILE_PROCESSOR] Result: file status updated to PROCESSING")
+    print(f"[FILE_PROCESSOR] Result: file status updated to PROCESSING with UmbrellaCode={umbrella_code}")
 
     print("[FILE_PROCESSOR] About to execute: build return dict with file_id, umbrella_id, period_id, records, record_count")
     result = {
@@ -707,8 +832,8 @@ def import_records(event: dict, logger: StructuredLogger) -> dict:
     file_id = event['fileId']
     print(f"[FILE_PROCESSOR] Result: file_id = {file_id}")
 
-    print("[FILE_PROCESSOR] About to execute: validated_records = event.get('validated_records', [])")
-    validated_records = event.get('validated_records', [])
+    print("[FILE_PROCESSOR] About to execute: validated_records = event.get('validation', {}).get('validatedRecords', [])")
+    validated_records = event.get('validation', {}).get('validatedRecords', [])
     print(f"[FILE_PROCESSOR] Result: validated_records count = {len(validated_records)}")
 
     print("[FILE_PROCESSOR] About to execute: has_warnings = event.get('has_warnings', False)")
@@ -811,8 +936,12 @@ def mark_complete(event: dict, logger: StructuredLogger) -> dict:
     file_id = event['fileId']
     print(f"[FILE_PROCESSOR] Result: file_id = {file_id}")
 
-    print("[FILE_PROCESSOR] About to execute: import_result = event.get('import_result', {})")
-    import_result = event.get('import_result', {})
+    print("[FILE_PROCESSOR] About to execute: umbrella_code = event.get('period', {}).get('umbrella_code') or event.get('umbrella_code') or event.get('metadata', {}).get('umbrella_code')")
+    umbrella_code = event.get('period', {}).get('umbrella_code') or event.get('umbrella_code') or event.get('metadata', {}).get('umbrella_code')
+    print(f"[FILE_PROCESSOR] Result: umbrella_code = {umbrella_code}")
+
+    print("[FILE_PROCESSOR] About to execute: import_result = event.get('import', {})")
+    import_result = event.get('import', {})
     print(f"[FILE_PROCESSOR] Result: import_result = {import_result}")
 
     print("[FILE_PROCESSOR] About to execute: has_warnings = event.get('has_warnings', False)")
@@ -840,14 +969,17 @@ def mark_complete(event: dict, logger: StructuredLogger) -> dict:
     timestamp = datetime.utcnow().isoformat() + 'Z'
     print(f"[FILE_PROCESSOR] Result: timestamp = {timestamp}")
 
-    print(f"[FILE_PROCESSOR] About to execute: dynamodb_client.update_file_status({file_id}, {status}, ValidRecords={records_imported}, ProcessingCompletedAt={timestamp})")
-    dynamodb_client.update_file_status(
-        file_id,
-        status,
-        ValidRecords=records_imported,
-        ProcessingCompletedAt=timestamp
-    )
-    print(f"[FILE_PROCESSOR] Result: file status updated to {status}")
+    # Build update kwargs
+    update_kwargs = {
+        'ValidRecords': records_imported,
+        'ProcessingCompletedAt': timestamp
+    }
+    if umbrella_code:
+        update_kwargs['UmbrellaCode'] = umbrella_code
+
+    print(f"[FILE_PROCESSOR] About to execute: dynamodb_client.update_file_status({file_id}, {status}, {update_kwargs})")
+    dynamodb_client.update_file_status(file_id, status, **update_kwargs)
+    print(f"[FILE_PROCESSOR] Result: file status updated to {status} with UmbrellaCode={umbrella_code}")
 
     print("[FILE_PROCESSOR] About to execute: build return dict with file_id, status, records_imported, message")
     result = {
@@ -871,6 +1003,10 @@ def mark_error(event: dict, logger: StructuredLogger) -> dict:
     file_id = event['fileId']
     print(f"[FILE_PROCESSOR] Result: file_id = {file_id}")
 
+    print("[FILE_PROCESSOR] About to execute: umbrella_code = event.get('period', {}).get('umbrella_code') or event.get('umbrella_code')")
+    umbrella_code = event.get('period', {}).get('umbrella_code') or event.get('umbrella_code')
+    print(f"[FILE_PROCESSOR] Result: umbrella_code = {umbrella_code}")
+
     print("[FILE_PROCESSOR] About to execute: validation_errors = event.get('validation_errors', [])")
     validation_errors = event.get('validation_errors', [])
     print(f"[FILE_PROCESSOR] Result: validation_errors count = {len(validation_errors)}")
@@ -889,17 +1025,20 @@ def mark_error(event: dict, logger: StructuredLogger) -> dict:
     timestamp = datetime.utcnow().isoformat() + 'Z'
     print(f"[FILE_PROCESSOR] Result: timestamp = {timestamp}")
 
-    print(f"[FILE_PROCESSOR] About to execute: dynamodb_client.update_file_status({file_id}, 'ERROR', ErrorRecords={len(validation_errors)}, ValidRecords=0, TotalRecords=0, ErrorMessage={error_message}, ProcessingCompletedAt={timestamp})")
-    dynamodb_client.update_file_status(
-        file_id,
-        'ERROR',
-        ErrorRecords=len(validation_errors),
-        ValidRecords=0,
-        TotalRecords=0,
-        ErrorMessage=error_message,
-        ProcessingCompletedAt=timestamp
-    )
-    print(f"[FILE_PROCESSOR] Result: file status updated to ERROR")
+    # Build update kwargs
+    update_kwargs = {
+        'ErrorRecords': len(validation_errors),
+        'ValidRecords': 0,
+        'TotalRecords': 0,
+        'ErrorMessage': error_message,
+        'ProcessingCompletedAt': timestamp
+    }
+    if umbrella_code:
+        update_kwargs['UmbrellaCode'] = umbrella_code
+
+    print(f"[FILE_PROCESSOR] About to execute: dynamodb_client.update_file_status({file_id}, 'ERROR', {update_kwargs})")
+    dynamodb_client.update_file_status(file_id, 'ERROR', **update_kwargs)
+    print(f"[FILE_PROCESSOR] Result: file status updated to ERROR with UmbrellaCode={umbrella_code}")
 
     print("[FILE_PROCESSOR] About to execute: build return dict with file_id, status='ERROR', message")
     result = {
@@ -921,6 +1060,10 @@ def mark_failed(event: dict, logger: StructuredLogger) -> dict:
     file_id = event['fileId']
     print(f"[FILE_PROCESSOR] Result: file_id = {file_id}")
 
+    print("[FILE_PROCESSOR] About to execute: umbrella_code = event.get('period', {}).get('umbrella_code') or event.get('umbrella_code') or event.get('metadata', {}).get('umbrella_code')")
+    umbrella_code = event.get('period', {}).get('umbrella_code') or event.get('umbrella_code') or event.get('metadata', {}).get('umbrella_code')
+    print(f"[FILE_PROCESSOR] Result: umbrella_code = {umbrella_code}")
+
     print("[FILE_PROCESSOR] About to execute: error = event.get('error', {})")
     error = event.get('error', {})
     print(f"[FILE_PROCESSOR] Result: error = {error}")
@@ -939,14 +1082,17 @@ def mark_failed(event: dict, logger: StructuredLogger) -> dict:
     timestamp = datetime.utcnow().isoformat() + 'Z'
     print(f"[FILE_PROCESSOR] Result: timestamp = {timestamp}")
 
-    print(f"[FILE_PROCESSOR] About to execute: dynamodb_client.update_file_status({file_id}, 'FAILED', ErrorMessage={error_message}, ProcessingCompletedAt={timestamp})")
-    dynamodb_client.update_file_status(
-        file_id,
-        'FAILED',
-        ErrorMessage=error_message,
-        ProcessingCompletedAt=timestamp
-    )
-    print(f"[FILE_PROCESSOR] Result: file status updated to FAILED")
+    # Build update kwargs
+    update_kwargs = {
+        'ErrorMessage': error_message,
+        'ProcessingCompletedAt': timestamp
+    }
+    if umbrella_code:
+        update_kwargs['UmbrellaCode'] = umbrella_code
+
+    print(f"[FILE_PROCESSOR] About to execute: dynamodb_client.update_file_status({file_id}, 'FAILED', {update_kwargs})")
+    dynamodb_client.update_file_status(file_id, 'FAILED', **update_kwargs)
+    print(f"[FILE_PROCESSOR] Result: file status updated to FAILED with UmbrellaCode={umbrella_code}")
 
     print("[FILE_PROCESSOR] About to execute: build return dict with file_id, status='FAILED', message")
     result = {

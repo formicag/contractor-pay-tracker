@@ -2,19 +2,407 @@
 
 {% block title %}Contractors - {{ app_name }}{% endblock %}
 
+{% block extra_css %}
+<style>
+    /* Search and Filter Bar */
+    .filter-bar {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        flex-wrap: wrap;
+        gap: 1rem;
+        margin-bottom: 1.5rem;
+    }
+
+    .search-box {
+        background: var(--bg-secondary);
+        border: 1px solid var(--border);
+        color: var(--text-primary);
+        padding: 0.5rem 1rem;
+        border-radius: 0.5rem;
+        font-size: 0.875rem;
+        min-width: 300px;
+    }
+
+    .search-box:focus {
+        outline: none;
+        border-color: var(--accent);
+        box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+    }
+
+    /* Sortable Table Headers */
+    table th.sortable {
+        cursor: pointer;
+        user-select: none;
+        position: relative;
+        padding-right: 2rem;
+    }
+
+    table th.sortable:hover {
+        color: var(--text-primary);
+    }
+
+    table th.sortable::after {
+        content: '⇅';
+        position: absolute;
+        right: 1rem;
+        opacity: 0.3;
+        font-size: 0.875rem;
+    }
+
+    table th.sortable.sorted-asc::after {
+        content: '↑';
+        opacity: 1;
+        color: var(--accent);
+    }
+
+    table th.sortable.sorted-desc::after {
+        content: '↓';
+        opacity: 1;
+        color: var(--accent);
+    }
+
+    /* Margin Color Coding */
+    .margin-high {
+        color: var(--success);
+        font-weight: 600;
+    }
+
+    .margin-medium {
+        color: var(--warning);
+        font-weight: 600;
+    }
+
+    .margin-low {
+        color: var(--danger);
+        font-weight: 600;
+    }
+
+    /* Warning Row Highlight */
+    .warning-row {
+        background: rgba(239, 68, 68, 0.05) !important;
+        border-left: 3px solid var(--danger);
+    }
+
+    .warning-row:hover {
+        background: rgba(239, 68, 68, 0.1) !important;
+    }
+
+    .warning-icon {
+        color: var(--danger);
+        font-weight: bold;
+        margin-right: 0.5rem;
+    }
+
+    /* Empty State */
+    .empty-state {
+        text-align: center;
+        padding: 4rem 2rem;
+        background: var(--bg-secondary);
+        border-radius: 0.5rem;
+        border: 1px solid var(--border);
+    }
+
+    .empty-icon {
+        font-size: 4rem;
+        margin-bottom: 1rem;
+        opacity: 0.5;
+    }
+
+    .empty-state h3 {
+        font-size: 1.25rem;
+        font-weight: 600;
+        color: var(--text-primary);
+        margin-bottom: 0.5rem;
+    }
+
+    .empty-state p {
+        color: var(--text-secondary);
+    }
+</style>
+{% endblock %}
+
 {% block content %}
 <h2>Contractors Management</h2>
 
-<div class="alert alert-info">
-    <strong>Coming Soon:</strong> Contractor management features will be available in a future update.
+<!-- Summary Cards -->
+<div class="summary-grid" id="summary-cards">
+    <div class="card">
+        <div class="card-header">Total Contractors</div>
+        <div class="card-value" id="total-contractors">0</div>
+        <div class="card-subtitle">All contractors</div>
+    </div>
+    <div class="card">
+        <div class="card-header">Active</div>
+        <div class="card-value" style="color: var(--success);" id="active-contractors">0</div>
+        <div class="card-subtitle">Currently active</div>
+    </div>
+    <div class="card">
+        <div class="card-header">Average Margin</div>
+        <div class="card-value" id="avg-margin">0%</div>
+        <div class="card-subtitle">Across all contractors</div>
+    </div>
+    <div class="card">
+        <div class="card-header">Total Sell Rate</div>
+        <div class="card-value" id="total-sell-rate">£0</div>
+        <div class="card-subtitle">Combined hourly rate</div>
+    </div>
 </div>
 
-<p>This page will allow you to:</p>
-<ul style="line-height: 2;">
-    <li>View all contractors in the system</li>
-    <li>See contractor-umbrella associations</li>
-    <li>View payment history by contractor</li>
-    <li>Add new contractors</li>
-    <li>Edit contractor details</li>
-</ul>
+<!-- Filter Bar -->
+<div class="filter-bar">
+    <input type="text" class="search-box" id="search-box" placeholder="Search contractors by name or job title..." onkeyup="filterContractors()">
+    <button class="btn" onclick="loadContractors()">↻ Refresh</button>
+</div>
+
+<!-- Contractors Container -->
+<div id="contractors-container">
+    <div class="spinner"></div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    let allContractors = [];
+    let currentSort = { column: null, direction: 'asc' };
+
+    // Load contractors on page load
+    window.addEventListener('DOMContentLoaded', () => {
+        loadContractors();
+    });
+
+    async function loadContractors() {
+        const container = document.getElementById('contractors-container');
+        container.innerHTML = '<div class="spinner"></div>';
+
+        try {
+            const response = await fetch('/api/contractors');
+            const data = await response.json();
+
+            if (data.error) {
+                container.innerHTML = '<div class="alert alert-danger">Failed to load contractors: ' + (data.message || data.error) + '</div>';
+                return;
+            }
+
+            allContractors = data.contractors || [];
+            updateSummaryCards();
+            displayContractors(allContractors);
+
+        } catch (error) {
+            container.innerHTML = '<div class="alert alert-danger">Failed to load contractors: ' + error.message + '</div>';
+        }
+    }
+
+    function updateSummaryCards() {
+        const total = allContractors.length;
+        const active = allContractors.filter(c => c.is_active).length;
+
+        // Calculate average margin
+        let totalMargin = 0;
+        let validMargins = 0;
+        allContractors.forEach(c => {
+            const marginPercent = parseFloat(c.margin_percent);
+            if (marginPercent !== undefined && !isNaN(marginPercent)) {
+                totalMargin += marginPercent;
+                validMargins++;
+            } else {
+                const sellRate = parseFloat(c.sell_rate) || 0;
+                const buyRate = parseFloat(c.buy_rate) || 0;
+                if (sellRate > 0) {
+                    const margin = ((sellRate - buyRate) / sellRate * 100);
+                    totalMargin += margin;
+                    validMargins++;
+                }
+            }
+        });
+        const avgMargin = validMargins > 0 ? (totalMargin / validMargins).toFixed(1) : 0;
+
+        // Calculate total sell rate
+        const totalSellRate = allContractors.reduce((sum, c) => sum + (parseFloat(c.sell_rate) || 0), 0);
+
+        document.getElementById('total-contractors').textContent = total;
+        document.getElementById('active-contractors').textContent = active;
+        document.getElementById('avg-margin').textContent = avgMargin + '%';
+        document.getElementById('total-sell-rate').textContent = '£' + totalSellRate.toLocaleString('en-GB', {minimumFractionDigits: 2, maximumFractionDigits: 2});
+    }
+
+    function displayContractors(contractors) {
+        const container = document.getElementById('contractors-container');
+
+        if (contractors.length === 0) {
+            container.innerHTML = `
+                <div class="empty-state">
+                    <div class="empty-icon">👥</div>
+                    <h3>No contractors found</h3>
+                    <p>Try adjusting your search criteria</p>
+                </div>
+            `;
+            return;
+        }
+
+        let html = `
+            <div class="table-container">
+                <table>
+                    <thead>
+                        <tr>
+                            <th style="width: 40px;"></th>
+                            <th class="sortable" onclick="sortTable('full_name')">Name</th>
+                            <th class="sortable" onclick="sortTable('job_title')">Job Title</th>
+                            <th class="sortable" onclick="sortTable('sell_rate')">Sell Rate</th>
+                            <th class="sortable" onclick="sortTable('buy_rate')">Buy Rate</th>
+                            <th class="sortable" onclick="sortTable('margin')">Margin</th>
+                            <th class="sortable" onclick="sortTable('margin_percent')">Margin %</th>
+                            <th class="sortable" onclick="sortTable('is_active')">Status</th>
+                            <th style="width: 100px;">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+        `;
+
+        contractors.forEach(contractor => {
+            const sellRate = parseFloat(contractor.sell_rate) || 0;
+            const buyRate = parseFloat(contractor.buy_rate) || 0;
+            const margin = parseFloat(contractor.margin) || (sellRate - buyRate);
+            const marginPercent = parseFloat(contractor.margin_percent) || (sellRate > 0 ? ((sellRate - buyRate) / sellRate * 100) : 0);
+
+            // Format currency with thousand separators
+            const formatCurrency = (value) => {
+                return '£' + value.toLocaleString('en-GB', {minimumFractionDigits: 2, maximumFractionDigits: 2});
+            };
+
+            // Check if margin is problematic (zero or negative)
+            const hasMarginIssue = margin <= 0 || marginPercent <= 0;
+            const rowClass = hasMarginIssue ? 'warning-row' : '';
+            const warningIcon = hasMarginIssue ? '<span class="warning-icon" title="Zero or negative margin!">⚠️</span>' : '';
+
+            // Color code margin percentage
+            let marginClass = 'margin-low';
+            if (marginPercent >= 20) {
+                marginClass = 'margin-high';
+            } else if (marginPercent >= 10) {
+                marginClass = 'margin-medium';
+            }
+
+            const statusBadge = contractor.is_active
+                ? '<span class="badge badge-success">Active</span>'
+                : '<span class="badge badge-info">Inactive</span>';
+
+            html += `
+                <tr class="${rowClass}">
+                    <td style="text-align: center;">${warningIcon}</td>
+                    <td><strong>${contractor.full_name}</strong></td>
+                    <td>${contractor.job_title || 'N/A'}</td>
+                    <td>${formatCurrency(sellRate)}</td>
+                    <td>${formatCurrency(buyRate)}</td>
+                    <td>${formatCurrency(margin)}</td>
+                    <td><span class="${marginClass}">${marginPercent.toFixed(1)}%</span></td>
+                    <td>${statusBadge}</td>
+                    <td style="text-align: center;">
+                        <a href="/contractors/edit/${encodeURIComponent(contractor.email)}" title="Edit contractor" style="text-decoration: none; font-size: 1.1rem; margin-right: 0.5rem;">✏️</a>
+                        <a href="/contractors/edit/${encodeURIComponent(contractor.email)}" class="btn btn-secondary" style="padding: 0.4rem 0.8rem; font-size: 0.75rem;">Edit</a>
+                    </td>
+                </tr>
+            `;
+        });
+
+        html += `
+                    </tbody>
+                </table>
+            </div>
+        `;
+
+        container.innerHTML = html;
+
+        // Update sort indicators
+        updateSortIndicators();
+    }
+
+    function sortTable(column) {
+        if (currentSort.column === column) {
+            currentSort.direction = currentSort.direction === 'asc' ? 'desc' : 'asc';
+        } else {
+            currentSort.column = column;
+            currentSort.direction = 'asc';
+        }
+
+        let sorted = [...allContractors];
+
+        sorted.sort((a, b) => {
+            let aVal, bVal;
+
+            if (column === 'margin' || column === 'margin_percent') {
+                aVal = parseFloat(a[column]) || 0;
+                bVal = parseFloat(b[column]) || 0;
+            } else if (column === 'sell_rate' || column === 'buy_rate') {
+                aVal = parseFloat(a[column]) || 0;
+                bVal = parseFloat(b[column]) || 0;
+            } else if (column === 'is_active') {
+                aVal = a[column] ? 1 : 0;
+                bVal = b[column] ? 1 : 0;
+            } else {
+                aVal = (a[column] || '').toString().toLowerCase();
+                bVal = (b[column] || '').toString().toLowerCase();
+            }
+
+            if (aVal < bVal) return currentSort.direction === 'asc' ? -1 : 1;
+            if (aVal > bVal) return currentSort.direction === 'asc' ? 1 : -1;
+            return 0;
+        });
+
+        // Filter the sorted results
+        const searchTerm = document.getElementById('search-box').value.toLowerCase();
+        if (searchTerm) {
+            sorted = sorted.filter(c =>
+                c.full_name.toLowerCase().includes(searchTerm) ||
+                (c.job_title && c.job_title.toLowerCase().includes(searchTerm))
+            );
+        }
+
+        displayContractors(sorted);
+    }
+
+    function updateSortIndicators() {
+        document.querySelectorAll('th.sortable').forEach(th => {
+            th.classList.remove('sorted-asc', 'sorted-desc');
+        });
+
+        if (currentSort.column) {
+            const columnMap = {
+                'full_name': 0,
+                'job_title': 1,
+                'sell_rate': 2,
+                'buy_rate': 3,
+                'margin': 4,
+                'margin_percent': 5,
+                'is_active': 6
+            };
+
+            const thIndex = columnMap[currentSort.column];
+            const th = document.querySelectorAll('th.sortable')[thIndex];
+            if (th) {
+                th.classList.add('sorted-' + currentSort.direction);
+            }
+        }
+    }
+
+    function filterContractors() {
+        const searchTerm = document.getElementById('search-box').value.toLowerCase();
+
+        let filtered = allContractors;
+
+        if (searchTerm) {
+            filtered = filtered.filter(c =>
+                c.full_name.toLowerCase().includes(searchTerm) ||
+                (c.job_title && c.job_title.toLowerCase().includes(searchTerm))
+            );
+        }
+
+        // Re-apply current sort
+        if (currentSort.column) {
+            sortTable(currentSort.column);
+        } else {
+            displayContractors(filtered);
+        }
+    }
+</script>
 {% endblock %}

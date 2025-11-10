@@ -4,77 +4,164 @@
 
 {% block extra_css %}
 <style>
+    /* Modern Upload Area */
     .upload-area {
-        border: 3px dashed #ddd;
-        border-radius: 8px;
-        padding: 60px 20px;
+        border: 3px dashed var(--border);
+        border-radius: 0.75rem;
+        padding: 4rem 2rem;
         text-align: center;
         cursor: pointer;
-        transition: all 0.3s;
-        margin: 20px 0;
+        transition: all 0.3s ease;
+        margin: 2rem 0;
+        background: var(--bg-secondary);
     }
 
-    .upload-area:hover,
+    .upload-area:hover {
+        border-color: var(--accent);
+        background: var(--bg-tertiary);
+        transform: translateY(-2px);
+        box-shadow: 0 4px 12px rgba(59, 130, 246, 0.15);
+    }
+
     .upload-area.dragover {
-        border-color: #3498db;
-        background: #f0f8ff;
+        border-color: var(--accent);
+        background: var(--bg-tertiary);
+        box-shadow: 0 0 0 4px rgba(59, 130, 246, 0.1);
     }
 
     .upload-area.uploading {
-        border-color: #27ae60;
-        background: #f0fff4;
+        border-color: var(--success);
+        background: rgba(16, 185, 129, 0.05);
     }
 
     .upload-icon {
-        font-size: 48px;
-        color: #bbb;
-        margin-bottom: 20px;
+        font-size: 4rem;
+        color: var(--text-secondary);
+        margin-bottom: 1.5rem;
+        transition: color 0.3s ease;
     }
 
+    .upload-area:hover .upload-icon,
     .upload-area.dragover .upload-icon {
-        color: #3498db;
+        color: var(--accent);
+        transform: scale(1.1);
+    }
+
+    .upload-area h3 {
+        font-size: 1.5rem;
+        font-weight: 600;
+        color: var(--text-primary);
+        margin-bottom: 0.75rem;
+    }
+
+    .upload-area p {
+        color: var(--text-secondary);
+        font-size: 0.875rem;
+        margin: 1rem 0;
     }
 
     #file-input {
         display: none;
     }
 
+    /* File Info Card */
     .file-info {
-        margin-top: 20px;
-        padding: 15px;
-        background: #f8f9fa;
-        border-radius: 4px;
+        margin-top: 2rem;
+        padding: 1.5rem;
+        background: var(--bg-secondary);
+        border: 1px solid var(--border);
+        border-radius: 0.5rem;
         display: none;
     }
 
+    .file-info p {
+        color: var(--text-primary);
+        margin-bottom: 1rem;
+        font-size: 0.875rem;
+    }
+
+    .file-info p strong {
+        color: var(--text-secondary);
+        text-transform: uppercase;
+        font-size: 0.75rem;
+        letter-spacing: 0.05em;
+        font-weight: 600;
+    }
+
+    .file-info p span {
+        color: var(--text-primary);
+        font-weight: 500;
+        margin-left: 0.5rem;
+    }
+
+    .file-info-actions {
+        display: flex;
+        gap: 0.75rem;
+        margin-top: 1.5rem;
+    }
+
+    /* Progress Bar */
     .progress-bar {
         width: 100%;
-        height: 30px;
-        background: #e0e0e0;
-        border-radius: 4px;
+        height: 2.5rem;
+        background: var(--bg-tertiary);
+        border-radius: 0.5rem;
         overflow: hidden;
-        margin: 20px 0;
+        margin: 2rem 0;
         display: none;
+        border: 1px solid var(--border);
     }
 
     .progress-fill {
         height: 100%;
-        background: linear-gradient(90deg, #3498db, #2ecc71);
+        background: linear-gradient(90deg, var(--accent), var(--success));
         width: 0%;
-        transition: width 0.3s;
+        transition: width 0.4s ease;
         display: flex;
         align-items: center;
         justify-content: center;
         color: white;
         font-weight: 600;
+        font-size: 0.875rem;
     }
 
+    /* Recent Uploads Section */
     .recent-uploads {
-        margin-top: 40px;
+        margin-top: 3rem;
+        padding-top: 2rem;
+        border-top: 1px solid var(--border);
     }
 
     .recent-uploads h3 {
-        margin-bottom: 20px;
+        font-size: 1.25rem;
+        font-weight: 600;
+        color: var(--text-primary);
+        margin-bottom: 1rem;
+    }
+
+    .recent-uploads p {
+        color: var(--text-secondary);
+        font-size: 0.875rem;
+    }
+
+    /* Info Alert Styling */
+    .upload-info {
+        background: rgba(59, 130, 246, 0.1);
+        border-left: 4px solid var(--accent);
+        padding: 1rem 1.25rem;
+        border-radius: 0.5rem;
+        margin-bottom: 2rem;
+    }
+
+    .upload-info strong {
+        color: var(--accent);
+        font-weight: 600;
+    }
+
+    .upload-info p {
+        color: var(--text-primary);
+        margin: 0;
+        font-size: 0.875rem;
     }
 </style>
 {% endblock %}
@@ -82,15 +169,15 @@
 {% block content %}
 <h2>Upload Contractor Pay File</h2>
 
-<div class="alert alert-info">
-    <strong>Supported formats:</strong> Excel (.xlsx) files from NASA, PARASOL, GIANT, PAYSTREAM, BROOKSON, or APSCo
+<div class="upload-info">
+    <p><strong>Supported formats:</strong> Excel (.xlsx) files from NASA, PARASOL, GIANT, PAYSTREAM, CLARITY, or WORKWELL</p>
 </div>
 
 <div class="upload-area" id="upload-area">
     <div class="upload-icon">📁</div>
     <h3>Drag and drop your file here</h3>
-    <p>or</p>
-    <button class="btn btn-success" onclick="document.getElementById('file-input').click()">
+    <p>or click to browse</p>
+    <button class="btn" onclick="document.getElementById('file-input').click()">
         Choose File
     </button>
     <input type="file" id="file-input" accept=".xlsx" />
@@ -99,8 +186,10 @@
 <div class="file-info" id="file-info">
     <p><strong>Selected file:</strong> <span id="file-name"></span></p>
     <p><strong>Size:</strong> <span id="file-size"></span></p>
-    <button class="btn" onclick="uploadFile()">Upload</button>
-    <button class="btn btn-danger" onclick="clearFile()">Clear</button>
+    <div class="file-info-actions">
+        <button class="btn btn-success" onclick="uploadFile()">Upload File</button>
+        <button class="btn btn-secondary" onclick="clearFile()">Clear</button>
+    </div>
 </div>
 
 <div class="progress-bar" id="progress-bar">
@@ -109,7 +198,7 @@
 
 <div class="recent-uploads">
     <h3>Recent Uploads</h3>
-    <p style="color: #666;">Your recently uploaded files will appear here.</p>
+    <p>Your recently uploaded files will appear here. Visit the <a href="/files" style="color: var(--accent); text-decoration: none;">Files page</a> to view all uploaded files.</p>
 </div>
 {% endblock %}
 

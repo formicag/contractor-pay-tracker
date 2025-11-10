@@ -216,21 +216,6 @@ def seed_test_data(dynamodb_table):
     for assoc in associations:
         dynamodb_table.put_item(Item=assoc)
 
-    # Seed permanent staff
-    permanent_staff = [
-        {
-            'PK': 'PERMANENT#Martin-Alabone',
-            'SK': 'PROFILE',
-            'EntityType': 'PermanentStaff',
-            'FirstName': 'Martin',
-            'LastName': 'Alabone',
-            'GSI2PK': 'NAME#martin alabone'
-        }
-    ]
-
-    for staff in permanent_staff:
-        dynamodb_table.put_item(Item=staff)
-
     # Seed system parameters
     params = [
         {'PK': 'SYSTEM', 'SK': 'PARAM#VAT_RATE', 'ParameterName': 'VAT_RATE', 'ParameterValue': '0.20'},
@@ -272,10 +257,6 @@ class TestFileProcessingWorkflow:
 
     def test_validation_all_pass(self, dynamodb_table, seed_test_data):
         """Test validation when all records pass"""
-        pass
-
-    def test_validation_permanent_staff_blocks(self, dynamodb_table, seed_test_data):
-        """Test validation blocks when permanent staff found"""
         pass
 
     def test_validation_fuzzy_match_warns(self, dynamodb_table, seed_test_data):
@@ -323,13 +304,6 @@ class TestEndToEndScenarios:
         """
         Scenario: PARASOL file includes Donna Smith (has association)
         Expected: Status COMPLETED
-        """
-        pass
-
-    def test_scenario_file_with_permanent_staff(self, dynamodb_table, s3_bucket, seed_test_data):
-        """
-        Scenario: File contains Martin Alabone (permanent staff)
-        Expected: Status ERROR, 0 records imported
         """
         pass
 

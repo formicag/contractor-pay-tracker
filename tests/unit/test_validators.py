@@ -1,6 +1,6 @@
 """
 Unit tests for validators.py
-Tests all 7 business rules for contractor pay validation
+Tests all business rules for contractor pay validation
 """
 
 import pytest
@@ -12,53 +12,8 @@ from common.validators import ValidationEngine
 class TestValidationEngine:
     """Test validation engine business rules"""
 
-    def test_rule1_permanent_staff_detected(self, mock_dynamodb_client, sample_pay_record):
-        """Rule 1: CRITICAL - Detects permanent staff and blocks import"""
-        validator = ValidationEngine(mock_dynamodb_client)
-
-        # Test with Martin Alabone (permanent staff)
-        record = sample_pay_record.copy()
-        record['forename'] = 'Martin'
-        record['surname'] = 'Alabone'
-
-        result = validator.check_permanent_staff(record)
-
-        assert result['valid'] is False
-        assert result['severity'] == 'CRITICAL'
-        assert 'permanent staff' in result['error']['error_message'].lower()
-        assert result['error']['error_type'] == 'PERMANENT_STAFF'
-
-    def test_rule1_permanent_staff_all_four_detected(self, mock_dynamodb_client, sample_pay_record):
-        """Rule 1: Verify all 4 permanent staff are detected"""
-        validator = ValidationEngine(mock_dynamodb_client)
-
-        permanent_staff = [
-            ('Syed', 'Syed'),
-            ('Victor', 'Cheung'),
-            ('Gareth', 'Jones'),
-            ('Martin', 'Alabone')
-        ]
-
-        for first_name, last_name in permanent_staff:
-            record = sample_pay_record.copy()
-            record['forename'] = first_name
-            record['surname'] = last_name
-
-            result = validator.check_permanent_staff(record)
-
-            assert result['valid'] is False, f"{first_name} {last_name} should be detected as permanent staff"
-            assert result['severity'] == 'CRITICAL'
-
-    def test_rule1_contractor_passes(self, mock_dynamodb_client, sample_pay_record):
-        """Rule 1: Valid contractor passes permanent staff check"""
-        validator = ValidationEngine(mock_dynamodb_client)
-
-        result = validator.check_permanent_staff(sample_pay_record)
-
-        assert result['valid'] is True
-
-    def test_rule2_exact_name_match(self, mock_dynamodb_client, sample_pay_record, sample_contractors):
-        """Rule 2: Exact contractor name match (100% confidence)"""
+    def test_rule1_exact_name_match(self, mock_dynamodb_client, sample_pay_record, sample_contractors):
+        """Rule 1: Exact contractor name match (100% confidence)"""
         validator = ValidationEngine(mock_dynamodb_client)
 
         result = validator.find_contractor(sample_pay_record, {'C001': sample_contractors[0]})
@@ -308,29 +263,6 @@ class TestValidationEngine:
         assert is_valid is True
         assert len(errors) == 0
         assert len(warnings) == 0
-
-    def test_validate_record_permanent_staff_blocks_all(self, mock_dynamodb_client, sample_pay_record, sample_contractors, sample_period_data):
-        """Complete validation: permanent staff blocks immediately"""
-        validator = ValidationEngine(mock_dynamodb_client)
-
-        # Martin Alabone (permanent staff)
-        record = sample_pay_record.copy()
-        record['forename'] = 'Martin'
-        record['surname'] = 'Alabone'
-
-        contractors_cache = {c['ContractorID']: c for c in sample_contractors}
-
-        is_valid, errors, warnings = validator.validate_record(
-            record,
-            'U001',
-            sample_period_data,
-            contractors_cache
-        )
-
-        assert is_valid is False
-        assert len(errors) == 1
-        assert errors[0]['error_type'] == 'PERMANENT_STAFF'
-        # Should stop validation immediately, not check other rules
 
     def test_validate_record_multiple_critical_errors(self, mock_dynamodb_client, sample_pay_record, sample_contractors, sample_period_data, sample_umbrella_associations):
         """Complete validation: multiple CRITICAL errors collected"""

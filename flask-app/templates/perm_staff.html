@@ -1,0 +1,569 @@
+{% extends "base.html" %}
+
+{% block title %}Permanent Staff - {{ app_name }}{% endblock %}
+
+{% block extra_css %}
+<style>
+    /* Search and Filter Bar */
+    .filter-bar {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        flex-wrap: wrap;
+        gap: 1rem;
+        margin-bottom: 1.5rem;
+    }
+
+    .search-box {
+        background: var(--bg-secondary);
+        border: 1px solid var(--border);
+        color: var(--text-primary);
+        padding: 0.5rem 1rem;
+        border-radius: 0.5rem;
+        font-size: 0.875rem;
+        min-width: 300px;
+    }
+
+    .search-box:focus {
+        outline: none;
+        border-color: var(--accent);
+        box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+    }
+
+    /* Sortable Table Headers */
+    table th.sortable {
+        cursor: pointer;
+        user-select: none;
+        position: relative;
+        padding-right: 2rem;
+    }
+
+    table th.sortable:hover {
+        color: var(--text-primary);
+    }
+
+    table th.sortable::after {
+        content: '⇅';
+        position: absolute;
+        right: 1rem;
+        opacity: 0.3;
+        font-size: 0.875rem;
+    }
+
+    table th.sortable.sorted-asc::after {
+        content: '↑';
+        opacity: 1;
+        color: var(--accent);
+    }
+
+    table th.sortable.sorted-desc::after {
+        content: '↓';
+        opacity: 1;
+        color: var(--accent);
+    }
+
+    /* Empty State */
+    .empty-state {
+        text-align: center;
+        padding: 4rem 2rem;
+        background: var(--bg-secondary);
+        border-radius: 0.5rem;
+        border: 1px solid var(--border);
+    }
+
+    .empty-icon {
+        font-size: 4rem;
+        margin-bottom: 1rem;
+        opacity: 0.5;
+    }
+
+    .empty-state h3 {
+        font-size: 1.25rem;
+        font-weight: 600;
+        color: var(--text-primary);
+        margin-bottom: 0.5rem;
+    }
+
+    .empty-state p {
+        color: var(--text-secondary);
+    }
+
+    /* Info badge for perm staff type */
+    .perm-staff-badge {
+        background: var(--accent);
+        color: white;
+        padding: 0.25rem 0.5rem;
+        border-radius: 0.25rem;
+        font-size: 0.75rem;
+        font-weight: 600;
+    }
+
+    /* Edit Icon Button */
+    .edit-icon {
+        cursor: pointer;
+        color: var(--text-secondary);
+        font-size: 1.1rem;
+        padding: 0.25rem 0.5rem;
+        transition: color 0.2s ease;
+    }
+
+    .edit-icon:hover {
+        color: var(--accent);
+    }
+
+    /* Modal Overlay */
+    .modal-overlay {
+        display: none;
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background: rgba(0, 0, 0, 0.7);
+        z-index: 1000;
+        align-items: center;
+        justify-content: center;
+    }
+
+    .modal-overlay.active {
+        display: flex;
+    }
+
+    .modal {
+        background: var(--bg-secondary);
+        border-radius: 0.5rem;
+        max-width: 600px;
+        width: 90%;
+        max-height: 90vh;
+        overflow-y: auto;
+        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.5);
+    }
+
+    .modal-header {
+        padding: 1.5rem;
+        border-bottom: 1px solid var(--border);
+    }
+
+    .modal-header h3 {
+        margin: 0;
+        color: var(--text-primary);
+        font-size: 1.25rem;
+    }
+
+    .modal-body {
+        padding: 1.5rem;
+    }
+
+    .form-group {
+        margin-bottom: 1rem;
+    }
+
+    .form-group label {
+        display: block;
+        margin-bottom: 0.5rem;
+        font-weight: 600;
+        color: var(--text-primary);
+        font-size: 0.875rem;
+    }
+
+    .form-group input,
+    .form-group select {
+        width: 100%;
+        padding: 0.5rem;
+        background: var(--bg-tertiary);
+        border: 1px solid var(--border);
+        border-radius: 0.375rem;
+        color: var(--text-primary);
+        font-size: 0.875rem;
+    }
+
+    .form-group input:focus,
+    .form-group select:focus {
+        outline: none;
+        border-color: var(--accent);
+    }
+
+    .modal-footer {
+        padding: 1rem 1.5rem;
+        border-top: 1px solid var(--border);
+        display: flex;
+        justify-content: flex-end;
+        gap: 0.75rem;
+    }
+
+    .btn-cancel {
+        background: var(--bg-tertiary);
+        color: var(--text-primary);
+        border: 1px solid var(--border);
+    }
+
+    .btn-cancel:hover {
+        background: var(--bg-primary);
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<h2>Permanent Staff Management</h2>
+
+<!-- Summary Cards -->
+<div class="summary-grid" id="summary-cards">
+    <div class="card">
+        <div class="card-header">Total Permanent Staff</div>
+        <div class="card-value" id="total-staff">0</div>
+        <div class="card-subtitle">All permanent employees</div>
+    </div>
+    <div class="card">
+        <div class="card-header">Active</div>
+        <div class="card-value" style="color: var(--success);" id="active-staff">0</div>
+        <div class="card-subtitle">Currently active</div>
+    </div>
+    <div class="card">
+        <div class="card-header">Average Sell Rate</div>
+        <div class="card-value" id="avg-sell-rate">£0</div>
+        <div class="card-subtitle">Average day rate</div>
+    </div>
+    <div class="card">
+        <div class="card-header">Total Sell Rate</div>
+        <div class="card-value" id="total-sell-rate">£0</div>
+        <div class="card-subtitle">Combined daily rate</div>
+    </div>
+</div>
+
+<!-- Filter Bar -->
+<div class="filter-bar">
+    <input type="text" class="search-box" id="search-box" placeholder="Search permanent staff by name or job title..." onkeyup="filterStaff()">
+    <button class="btn" onclick="loadStaff()">↻ Refresh</button>
+</div>
+
+<!-- Staff Container -->
+<div id="staff-container">
+    <div class="spinner"></div>
+</div>
+
+<!-- Edit Modal -->
+<div class="modal-overlay" id="edit-modal">
+    <div class="modal">
+        <div class="modal-header">
+            <h3>Edit Permanent Staff</h3>
+        </div>
+        <div class="modal-body">
+            <form id="edit-form">
+                <div class="form-group">
+                    <label>First Name</label>
+                    <input type="text" id="edit-first-name" required>
+                </div>
+                <div class="form-group">
+                    <label>Last Name</label>
+                    <input type="text" id="edit-last-name" required>
+                </div>
+                <div class="form-group">
+                    <label>Email</label>
+                    <input type="email" id="edit-email" readonly style="background: var(--bg-primary); opacity: 0.7;">
+                </div>
+                <div class="form-group">
+                    <label>Job Title</label>
+                    <input type="text" id="edit-job-title">
+                </div>
+                <div class="form-group">
+                    <label>Customer</label>
+                    <input type="text" id="edit-customer">
+                </div>
+                <div class="form-group">
+                    <label>Day Rate (£)</label>
+                    <input type="number" id="edit-sell-rate" step="0.01" min="0">
+                </div>
+                <div class="form-group">
+                    <label>Status</label>
+                    <select id="edit-status">
+                        <option value="true">Active</option>
+                        <option value="false">Inactive</option>
+                    </select>
+                </div>
+            </form>
+        </div>
+        <div class="modal-footer">
+            <button type="button" class="btn btn-cancel" onclick="closeEditModal()">Cancel</button>
+            <button type="button" class="btn" onclick="saveStaff()">Save Changes</button>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    let allStaff = [];
+    let currentSort = { column: null, direction: 'asc' };
+
+    // Load staff on page load
+    window.addEventListener('DOMContentLoaded', () => {
+        loadStaff();
+    });
+
+    async function loadStaff() {
+        const container = document.getElementById('staff-container');
+        container.innerHTML = '<div class="spinner"></div>';
+
+        try {
+            const response = await fetch('/api/perm-staff');
+            const data = await response.json();
+
+            if (data.error) {
+                container.innerHTML = '<div class="alert alert-danger">Failed to load permanent staff: ' + (data.message || data.error) + '</div>';
+                return;
+            }
+
+            allStaff = data.staff || [];
+            updateSummaryCards();
+            displayStaff(allStaff);
+
+        } catch (error) {
+            container.innerHTML = '<div class="alert alert-danger">Failed to load permanent staff: ' + error.message + '</div>';
+        }
+    }
+
+    function updateSummaryCards() {
+        const total = allStaff.length;
+        const active = allStaff.filter(s => s.is_active).length;
+
+        // Calculate average sell rate
+        const totalSellRate = allStaff.reduce((sum, s) => sum + (parseFloat(s.sell_rate) || 0), 0);
+        const avgSellRate = total > 0 ? totalSellRate / total : 0;
+
+        document.getElementById('total-staff').textContent = total;
+        document.getElementById('active-staff').textContent = active;
+        document.getElementById('avg-sell-rate').textContent = '£' + avgSellRate.toLocaleString('en-GB', {minimumFractionDigits: 2, maximumFractionDigits: 2});
+        document.getElementById('total-sell-rate').textContent = '£' + totalSellRate.toLocaleString('en-GB', {minimumFractionDigits: 2, maximumFractionDigits: 2});
+    }
+
+    function displayStaff(staff) {
+        const container = document.getElementById('staff-container');
+
+        if (staff.length === 0) {
+            container.innerHTML = `
+                <div class="empty-state">
+                    <div class="empty-icon">👥</div>
+                    <h3>No permanent staff found</h3>
+                    <p>Try adjusting your search criteria</p>
+                </div>
+            `;
+            return;
+        }
+
+        let html = `
+            <div class="table-container">
+                <table>
+                    <thead>
+                        <tr>
+                            <th class="sortable" onclick="sortTable('full_name')">Name</th>
+                            <th class="sortable" onclick="sortTable('job_title')">Job Title</th>
+                            <th class="sortable" onclick="sortTable('customer')">Customer</th>
+                            <th class="sortable" onclick="sortTable('engagement_type')">Engagement Type</th>
+                            <th class="sortable" onclick="sortTable('sell_rate')">Day Rate</th>
+                            <th class="sortable" onclick="sortTable('is_active')">Status</th>
+                            <th style="width: 50px;">Edit</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+        `;
+
+        staff.forEach(person => {
+            const sellRate = parseFloat(person.sell_rate) || 0;
+
+            // Format currency with thousand separators
+            const formatCurrency = (value) => {
+                return '£' + value.toLocaleString('en-GB', {minimumFractionDigits: 2, maximumFractionDigits: 2});
+            };
+
+            const statusBadge = person.is_active
+                ? '<span class="badge badge-success">Active</span>'
+                : '<span class="badge badge-info">Inactive</span>';
+
+            const personJson = JSON.stringify(person).replace(/"/g, '&quot;');
+
+            html += `
+                <tr>
+                    <td><strong>${person.full_name}</strong></td>
+                    <td>${person.job_title || 'N/A'}</td>
+                    <td>${person.customer || 'N/A'}</td>
+                    <td><span class="perm-staff-badge">${person.engagement_type || 'PAYE'}</span></td>
+                    <td>${sellRate > 0 ? formatCurrency(sellRate) : 'N/A'}</td>
+                    <td>${statusBadge}</td>
+                    <td style="text-align: center;">
+                        <span class="edit-icon" onclick='openEditModal(${personJson})' title="Edit">✏️</span>
+                    </td>
+                </tr>
+            `;
+        });
+
+        html += `
+                    </tbody>
+                </table>
+            </div>
+        `;
+
+        container.innerHTML = html;
+
+        // Update sort indicators
+        updateSortIndicators();
+    }
+
+    function sortTable(column) {
+        if (currentSort.column === column) {
+            currentSort.direction = currentSort.direction === 'asc' ? 'desc' : 'asc';
+        } else {
+            currentSort.column = column;
+            currentSort.direction = 'asc';
+        }
+
+        let sorted = [...allStaff];
+
+        sorted.sort((a, b) => {
+            let aVal, bVal;
+
+            if (column === 'sell_rate') {
+                aVal = parseFloat(a[column]) || 0;
+                bVal = parseFloat(b[column]) || 0;
+            } else if (column === 'is_active') {
+                aVal = a[column] ? 1 : 0;
+                bVal = b[column] ? 1 : 0;
+            } else {
+                aVal = (a[column] || '').toString().toLowerCase();
+                bVal = (b[column] || '').toString().toLowerCase();
+            }
+
+            if (aVal < bVal) return currentSort.direction === 'asc' ? -1 : 1;
+            if (aVal > bVal) return currentSort.direction === 'asc' ? 1 : -1;
+            return 0;
+        });
+
+        // Filter the sorted results
+        const searchTerm = document.getElementById('search-box').value.toLowerCase();
+        if (searchTerm) {
+            sorted = sorted.filter(s =>
+                s.full_name.toLowerCase().includes(searchTerm) ||
+                (s.job_title && s.job_title.toLowerCase().includes(searchTerm))
+            );
+        }
+
+        displayStaff(sorted);
+    }
+
+    function updateSortIndicators() {
+        document.querySelectorAll('th.sortable').forEach(th => {
+            th.classList.remove('sorted-asc', 'sorted-desc');
+        });
+
+        if (currentSort.column) {
+            const columnMap = {
+                'full_name': 0,
+                'job_title': 1,
+                'customer': 2,
+                'engagement_type': 3,
+                'sell_rate': 4,
+                'is_active': 5
+            };
+
+            const thIndex = columnMap[currentSort.column];
+            const th = document.querySelectorAll('th.sortable')[thIndex];
+            if (th) {
+                th.classList.add('sorted-' + currentSort.direction);
+            }
+        }
+    }
+
+    function filterStaff() {
+        const searchTerm = document.getElementById('search-box').value.toLowerCase();
+
+        let filtered = allStaff;
+
+        if (searchTerm) {
+            filtered = filtered.filter(s =>
+                s.full_name.toLowerCase().includes(searchTerm) ||
+                (s.job_title && s.job_title.toLowerCase().includes(searchTerm))
+            );
+        }
+
+        // Re-apply current sort
+        if (currentSort.column) {
+            sortTable(currentSort.column);
+        } else {
+            displayStaff(filtered);
+        }
+    }
+
+    let currentEditPerson = null;
+
+    function openEditModal(person) {
+        currentEditPerson = person;
+
+        // Populate form fields
+        document.getElementById('edit-first-name').value = person.first_name || '';
+        document.getElementById('edit-last-name').value = person.last_name || '';
+        document.getElementById('edit-email').value = person.email || '';
+        document.getElementById('edit-job-title').value = person.job_title || '';
+        document.getElementById('edit-customer').value = person.customer || '';
+        document.getElementById('edit-sell-rate').value = person.sell_rate || '';
+        document.getElementById('edit-status').value = person.is_active ? 'true' : 'false';
+
+        // Show modal
+        document.getElementById('edit-modal').classList.add('active');
+    }
+
+    function closeEditModal() {
+        document.getElementById('edit-modal').classList.remove('active');
+        currentEditPerson = null;
+    }
+
+    async function saveStaff() {
+        if (!currentEditPerson) {
+            return;
+        }
+
+        // Get form values
+        const updatedData = {
+            first_name: document.getElementById('edit-first-name').value,
+            last_name: document.getElementById('edit-last-name').value,
+            job_title: document.getElementById('edit-job-title').value,
+            customer: document.getElementById('edit-customer').value,
+            sell_rate: parseFloat(document.getElementById('edit-sell-rate').value) || 0,
+            is_active: document.getElementById('edit-status').value === 'true'
+        };
+
+        try {
+            const response = await fetch(`/api/perm-staff/${encodeURIComponent(currentEditPerson.email)}`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify(updatedData)
+            });
+
+            const result = await response.json();
+
+            if (result.success) {
+                // Close modal
+                closeEditModal();
+
+                // Reload data
+                loadStaff();
+
+                // Show success message (optional)
+                alert('Staff member updated successfully');
+            } else {
+                alert('Error: ' + (result.message || 'Failed to update staff member'));
+            }
+        } catch (error) {
+            console.error('Error saving staff:', error);
+            alert('Error: ' + error.message);
+        }
+    }
+
+    // Close modal when clicking outside
+    document.getElementById('edit-modal').addEventListener('click', function(event) {
+        if (event.target === this) {
+            closeEditModal();
+        }
+    });
+</script>
+{% endblock %}

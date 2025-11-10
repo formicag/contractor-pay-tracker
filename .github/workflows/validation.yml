@@ -1,0 +1,211 @@
+name: Validation & Security Checks
+
+on:
+  pull_request:
+    branches: [main, develop]
+  push:
+    branches: [main, develop]
+
+jobs:
+  lint-and-format:
+    name: Python Linting & Formatting
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ['3.12', '3.13']
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: 'pip'
+
+      - name: Cache Python dependencies
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements*.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-
+
+      - name: Install linting tools
+        run: |
+          python -m pip install --upgrade pip
+          pip install flake8 black isort pylint
+
+      - name: Run flake8 (critical errors)
+        run: |
+          # Stop the build if there are Python syntax errors or undefined names
+          flake8 backend/functions --count --select=E9,F63,F7,F82 --show-source --statistics
+          flake8 backend/layers/common/python --count --select=E9,F63,F7,F82 --show-source --statistics
+
+      - name: Run flake8 (warnings)
+        continue-on-error: true
+        run: |
+          # Exit-zero treats all errors as warnings
+          flake8 backend/functions --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
+          flake8 backend/layers/common/python --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
+
+      - name: Check code formatting with black
+        run: |
+          black --check backend/functions backend/layers/common/python
+
+      - name: Check import sorting with isort
+        run: |
+          isort --check-only backend/functions backend/layers/common/python
+
+      - name: Run pylint
+        continue-on-error: true
+        run: |
+          pip install -r backend/layers/common/requirements.txt
+          pylint backend/functions/*/app.py backend/layers/common/python/common/*.py --exit-zero
+
+  type-checking:
+    name: Type Checking with mypy
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install mypy boto3-stubs[s3,dynamodb,stepfunctions] types-openpyxl
+          pip install -r backend/layers/common/requirements.txt
+
+      - name: Run mypy type checking
+        continue-on-error: true
+        run: |
+          mypy backend/functions --ignore-missing-imports --no-strict-optional
+          mypy backend/layers/common/python/common --ignore-missing-imports --no-strict-optional
+
+  security-scan:
+    name: Security Scanning
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+
+      - name: Install security tools
+        run: |
+          python -m pip install --upgrade pip
+          pip install bandit safety pip-audit
+
+      - name: Run bandit security scanner
+        run: |
+          bandit -r backend/functions backend/layers/common/python -f json -o bandit-report.json
+          bandit -r backend/functions backend/layers/common/python
+
+      - name: Run safety check for dependencies
+        continue-on-error: true
+        run: |
+          pip install -r backend/layers/common/requirements.txt
+          safety check --json
+
+      - name: Run pip-audit
+        continue-on-error: true
+        run: |
+          pip-audit --requirement backend/layers/common/requirements.txt
+
+      - name: Upload security report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: security-report
+          path: bandit-report.json
+
+  validation-engine-tests:
+    name: Validation Engine Tests
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+
+      - name: Cache Python dependencies
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-validation-${{ hashFiles('**/requirements*.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-validation-
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r tests/requirements.txt
+          pip install -r backend/layers/common/requirements.txt
+
+      - name: Run validation engine tests
+        run: |
+          pytest tests/unit/ -v --cov=backend/layers/common/python/common --cov-report=xml --cov-report=term-missing --cov-report=html
+
+      - name: Upload coverage report
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: htmlcov/
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v4
+        with:
+          file: ./coverage.xml
+          fail_ci_if_error: false
+          token: ${{ secrets.CODECOV_TOKEN }}
+
+  code-quality:
+    name: Code Quality Metrics
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install tools
+        run: |
+          python -m pip install --upgrade pip
+          pip install radon mccabe
+
+      - name: Calculate cyclomatic complexity
+        continue-on-error: true
+        run: |
+          radon cc backend/functions backend/layers/common/python -a -s
+
+      - name: Calculate maintainability index
+        continue-on-error: true
+        run: |
+          radon mi backend/functions backend/layers/common/python -s
+
+      - name: Calculate raw metrics
+        continue-on-error: true
+        run: |
+          radon raw backend/functions backend/layers/common/python -s

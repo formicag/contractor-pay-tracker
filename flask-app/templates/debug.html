@@ -1677,19 +1677,12 @@
         }
 
         let html = '';
-        let totalErrors = 0;
-        let totalWarnings = 0;
 
-        // Count errors and warnings
-        validationRules.forEach(rule => {
-            if (!rule.passed) {
-                if (rule.is_warning || rule.severity === 'WARNING') {
-                    totalWarnings++;
-                } else {
-                    totalErrors++;
-                }
-            }
-        });
+        // Count stats from snapshot or validation rules
+        const totalErrors = snapshot?.critical_failures || validationRules.filter(r => !r.passed && r.severity === 'CRITICAL').length;
+        const totalWarnings = snapshot?.warnings || validationRules.filter(r => !r.passed && r.severity === 'WARNING').length;
+        const totalPassed = snapshot?.passed_checks || validationRules.filter(r => r.passed).length;
+        const totalChecks = snapshot?.total_checks || validationRules.length;
 
         // Update badge
         const status = snapshot?.status || 'UNKNOWN';
@@ -1697,7 +1690,7 @@
             badge.textContent = `${totalErrors} error${totalErrors !== 1 ? 's' : ''}`;
             badge.style.background = 'var(--danger)';
             badge.style.color = 'white';
-        } else if (status === 'COMPLETED' || status === 'SUCCESS') {
+        } else if (status === 'COMPLETED' || status === 'SUCCESS' || status === 'PASSED') {
             badge.textContent = 'All checks passed';
             badge.style.background = 'var(--success)';
             badge.style.color = 'white';
@@ -1705,7 +1698,7 @@
             badge.textContent = status;
         }
 
-        // Validation Status Header (like your screenshot)
+        // Validation Status Header
         const headerBg = status === 'FAILED' ? 'rgba(239, 68, 68, 0.1)' : 'rgba(34, 197, 94, 0.1)';
         const headerBorder = status === 'FAILED' ? 'var(--danger)' : 'var(--success)';
         const headerColor = status === 'FAILED' ? 'var(--danger)' : 'var(--success)';
@@ -1715,105 +1708,103 @@
         html += `<h3 style="color: ${headerColor}; margin: 0; font-size: 1.25rem; display: flex; align-items: center; gap: 0.5rem;">`;
         html += `<span style="font-size: 1.5rem;">${statusIcon}</span> Validation: ${status}`;
         html += `</h3>`;
-        if (totalErrors > 0 || totalWarnings > 0) {
-            html += `<p style="margin: 0.5rem 0 0 0; color: var(--text-secondary);">`;
-            html += `VALIDATION FAILED for records: ${totalErrors} error(s), ${totalWarnings} warning(s)`;
-            html += `</p>`;
-        }
+        html += `<p style="margin: 0.5rem 0 0 0; color: var(--text-secondary);">`;
+        html += `Total Checks: ${totalChecks} | Passed: ${totalPassed} | Critical Failures: ${totalErrors} | Warnings: ${totalWarnings}`;
+        html += `</p>`;
         html += `</div>`;
 
-        // Validation Rules
+        // Validation Checks Table
         if (validationRules.length === 0) {
             html += '<div class="empty-state"><h4>No Validation Data</h4><p>No validation results found for this file</p></div>';
         } else {
-            // Create detailed table like your screenshot
+            // Enterprise validation table with Type, Item, Calculated (Actual), Expected, ✓
             html += '<div style="margin-bottom: 1.5rem;">';
             html += '<table style="width: 100%; border-collapse: collapse; background: var(--bg-secondary); border-radius: 0.5rem; overflow: hidden;">';
             html += '<thead><tr style="background: var(--bg-tertiary);">';
             html += '<th style="padding: 0.75rem; text-align: left; border-bottom: 1px solid var(--border); font-weight: 600;">Type</th>';
-            html += '<th style="padding: 0.75rem; text-align: left; border-bottom: 1px solid var(--border); font-weight: 600;">Item</th>';
-            html += '<th style="padding: 0.75rem; text-align: left; border-bottom: 1px solid var(--border); font-weight: 600;">Calculated</th>';
+            html += '<th style="padding: 0.75rem; text-align: left; border-bottom: 1px solid var(--border); font-weight: 600;">Check</th>';
+            html += '<th style="padding: 0.75rem; text-align: left; border-bottom: 1px solid var(--border); font-weight: 600;">Actual</th>';
             html += '<th style="padding: 0.75rem; text-align: left; border-bottom: 1px solid var(--border); font-weight: 600;">Expected</th>';
-            html += '<th style="padding: 0.75rem; text-align: center; border-bottom: 1px solid var(--border); font-weight: 600; width: 50px;">✓</th>';
+            html += '<th style="padding: 0.75rem; text-align: center; border-bottom: 1px solid var(--border); font-weight: 600; width: 60px;">✓</th>';
             html += '</tr></thead><tbody>';
 
-            validationRules.forEach((rule, index) => {
-                const passed = rule.passed;
-                const isWarning = rule.is_warning || rule.severity === 'WARNING';
-                const rowBg = !passed ? 'rgba(239, 68, 68, 0.05)' : 'transparent';
-                const icon = passed ? '<span style="color: var(--success); font-size: 1.25rem;">✓</span>' : '<span style="color: var(--danger); font-size: 1.25rem;">✗</span>';
+            // Group checks by record
+            const byRecord = {};
+            validationRules.forEach(check => {
+                const recordKey = check.record_index !== undefined ? `Record ${check.record_index + 1}` : 'File-Level';
+                if (!byRecord[recordKey]) byRecord[recordKey] = [];
+                byRecord[recordKey].push(check);
+            });
 
-                // Extract type and item from rule name
-                const ruleName = rule.name || 'Unknown';
-                let ruleType = 'Validation';
-                let ruleItem = ruleName;
+            // Display checks grouped by record
+            Object.keys(byRecord).sort().forEach(recordKey => {
+                const checks = byRecord[recordKey];
 
-                // Try to parse rule name for better display
-                if (ruleName.includes(':')) {
-                    const parts = ruleName.split(':');
-                    ruleType = parts[0].trim();
-                    ruleItem = parts[1]?.trim() || ruleType;
-                }
-
-                // Get values from error messages if available
-                let calculated = '-';
-                let expected = '-';
-
-                if (rule.errors && rule.errors.length > 0) {
-                    const firstError = rule.errors[0];
-                    calculated = firstError.actual_value || firstError.calculated || '-';
-                    expected = firstError.expected_value || firstError.expected || '-';
-                } else if (rule.messages && rule.messages.length > 0) {
-                    // Try to parse from message
-                    const msg = rule.messages[0];
-                    const calcMatch = msg.match(/calculated:?\s*([^\s,]+)/i) || msg.match(/actual:?\s*([^\s,]+)/i);
-                    const expMatch = msg.match(/expected:?\s*([^\s,]+)/i);
-                    if (calcMatch) calculated = calcMatch[1];
-                    if (expMatch) expected = expMatch[1];
-                }
-
-                html += `<tr style="background: ${rowBg}; border-bottom: 1px solid var(--border);">`;
-                html += `<td style="padding: 0.75rem;">${escapeHtml(ruleType)}</td>`;
-                html += `<td style="padding: 0.75rem;">${escapeHtml(ruleItem)}</td>`;
-                html += `<td style="padding: 0.75rem;">${escapeHtml(String(calculated))}</td>`;
-                html += `<td style="padding: 0.75rem;">${escapeHtml(String(expected))}</td>`;
-                html += `<td style="padding: 0.75rem; text-align: center;">${icon}</td>`;
+                // Record header row
+                html += `<tr style="background: var(--bg-tertiary); font-weight: 600;">`;
+                html += `<td colspan="5" style="padding: 0.5rem 0.75rem; border-top: 2px solid var(--border);">${recordKey}</td>`;
                 html += '</tr>';
+
+                // Display each check for this record
+                checks.forEach(check => {
+                    const passed = check.passed;
+                    const isCritical = check.severity === 'CRITICAL';
+                    const isWarning = check.severity === 'WARNING';
+                    const rowBg = !passed && isCritical ? 'rgba(239, 68, 68, 0.08)' : (!passed && isWarning ? 'rgba(251, 191, 36, 0.05)' : 'transparent');
+                    const icon = passed ? '<span style="color: var(--success); font-size: 1.25rem;">✓</span>' : (isCritical ? '<span style="color: var(--danger); font-size: 1.25rem;">✗</span>' : '<span style="color: var(--warning); font-size: 1.25rem;">⚠</span>');
+
+                    const checkType = check.check_type || 'Validation';
+                    const checkName = check.check_name || check.name || 'Unknown';
+                    const actual = check.actual || '-';
+                    const expected = check.expected || '-';
+
+                    html += `<tr style="background: ${rowBg}; border-bottom: 1px solid var(--border);">`;
+                    html += `<td style="padding: 0.75rem; font-size: 0.875rem;">${escapeHtml(checkType)}</td>`;
+                    html += `<td style="padding: 0.75rem;">${escapeHtml(checkName)}</td>`;
+                    html += `<td style="padding: 0.75rem; font-family: monospace;">${escapeHtml(String(actual))}</td>`;
+                    html += `<td style="padding: 0.75rem; font-family: monospace;">${escapeHtml(String(expected))}</td>`;
+                    html += `<td style="padding: 0.75rem; text-align: center;">${icon}</td>`;
+                    html += '</tr>';
+                });
             });
 
             html += '</tbody></table></div>';
 
-            // Collect all error messages
-            const allErrors = [];
-            validationRules.forEach(rule => {
-                if (!rule.passed) {
-                    if (rule.errors && rule.errors.length > 0) {
-                        rule.errors.forEach(error => {
-                            allErrors.push(error.message || rule.name);
-                        });
-                    } else if (rule.messages && rule.messages.length > 0) {
-                        allErrors.push(...rule.messages);
-                    } else {
-                        allErrors.push(rule.name);
-                    }
-                }
-            });
+            // Display error/warning messages
+            const failures = validationRules.filter(r => !r.passed);
+            if (failures.length > 0) {
+                const errors = failures.filter(r => r.severity === 'CRITICAL');
+                const warnings = failures.filter(r => r.severity === 'WARNING');
 
-            // Display error messages like your screenshot
-            if (allErrors.length > 0) {
-                html += '<div style="background: rgba(239, 68, 68, 0.1); border: 2px solid var(--danger); border-radius: 0.5rem; padding: 1rem;">';
-                html += '<h4 style="color: var(--danger); margin: 0 0 1rem 0; display: flex; align-items: center; gap: 0.5rem;">';
-                html += '<span style="font-size: 1.25rem;">✗</span> Validation Errors:';
-                html += '</h4>';
-                html += '<ul style="margin: 0; padding-left: 1.5rem; color: var(--text-primary);">';
-                allErrors.forEach(error => {
-                    html += `<li style="margin-bottom: 0.5rem; display: flex; align-items: flex-start; gap: 0.5rem;">`;
-                    html += `<span style="color: var(--danger); font-weight: bold;">✗</span>`;
-                    html += `<span>${escapeHtml(error)}</span>`;
-                    html += `</li>`;
-                });
-                html += '</ul>';
-                html += '</div>';
+                if (errors.length > 0) {
+                    html += '<div style="background: rgba(239, 68, 68, 0.1); border: 2px solid var(--danger); border-radius: 0.5rem; padding: 1rem; margin-bottom: 1rem;">';
+                    html += '<h4 style="color: var(--danger); margin: 0 0 1rem 0; display: flex; align-items: center; gap: 0.5rem;">';
+                    html += `<span style="font-size: 1.25rem;">✗</span> Critical Failures (${errors.length}):`;
+                    html += '</h4>';
+                    html += '<ul style="margin: 0; padding-left: 1.5rem; color: var(--text-primary);">';
+                    errors.forEach(error => {
+                        html += `<li style="margin-bottom: 0.5rem;">`;
+                        html += `<strong>${escapeHtml(error.check_name || error.name)}:</strong> ${escapeHtml(error.message || 'Check failed')}`;
+                        if (error.contractor_name) html += ` (${escapeHtml(error.contractor_name)})`;
+                        html += `</li>`;
+                    });
+                    html += '</ul></div>';
+                }
+
+                if (warnings.length > 0) {
+                    html += '<div style="background: rgba(251, 191, 36, 0.1); border: 2px solid var(--warning); border-radius: 0.5rem; padding: 1rem;">';
+                    html += '<h4 style="color: var(--warning); margin: 0 0 1rem 0; display: flex; align-items: center; gap: 0.5rem;">';
+                    html += `<span style="font-size: 1.25rem;">⚠</span> Warnings (${warnings.length}):`;
+                    html += '</h4>';
+                    html += '<ul style="margin: 0; padding-left: 1.5rem; color: var(--text-primary);">';
+                    warnings.forEach(warning => {
+                        html += `<li style="margin-bottom: 0.5rem;">`;
+                        html += `<strong>${escapeHtml(warning.check_name || warning.name)}:</strong> ${escapeHtml(warning.message || 'Check failed')}`;
+                        if (warning.contractor_name) html += ` (${escapeHtml(warning.contractor_name)})`;
+                        html += `</li>`;
+                    });
+                    html += '</ul></div>';
+                }
             }
         }
 
