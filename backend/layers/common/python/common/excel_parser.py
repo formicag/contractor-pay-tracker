@@ -312,12 +312,42 @@ class PayFileParser:
         final_total_hours = float(total_hours) if total_hours else float(unit_days * Decimal('8'))
         print(f"[PARSE_ROW] final_total_hours={final_total_hours}")
 
+        # Construct contractor_name from surname + forename
+        print(f"[PARSE_ROW] Constructing contractor_name from surname + forename")
+        contractor_name = f"{forename} {surname}".strip()
+        print(f"[PARSE_ROW] contractor_name={contractor_name}")
+
+        # Map fields for validator/importer compatibility
+        print(f"[PARSE_ROW] Creating field mappings for validator/importer")
+        pay_rate = float(day_rate)  # day_rate from Excel = pay_rate expected by validator
+        units = float(unit_days)     # unit_days from Excel = units expected by validator
+        pay_amount = float(amount)   # amount from Excel = pay_amount expected by validator
+
+        # Note: charge_rate is NOT in umbrella company files (these show what WE pay)
+        # charge_rate comes from our internal contractor agreements
+        # For now, set to 0 - will be populated by validator from DynamoDB lookup
+        charge_rate = 0.0
+        charge_amount = 0.0
+        margin = 0.0
+        margin_percent = 0.0
+        print(f"[PARSE_ROW] Mapped fields: pay_rate={pay_rate}, units={units}, pay_amount={pay_amount}")
+
         record = {
             'row_number': row_number,
             'row_idx': row_idx,
             'employee_id': employee_id,
+            'contractor_name': contractor_name,  # Combined name for validation
             'surname': surname,
             'forename': forename,
+            # Mapped fields for validator/importer
+            'pay_rate': pay_rate,
+            'charge_rate': charge_rate,  # Will be populated from DynamoDB
+            'units': units,
+            'pay_amount': pay_amount,
+            'charge_amount': charge_amount,  # Will be calculated after charge_rate lookup
+            'margin': margin,                 # Will be calculated after charge_rate lookup
+            'margin_percent': margin_percent, # Will be calculated after charge_rate lookup
+            # Original fields for reference
             'unit_days': float(unit_days),
             'day_rate': float(day_rate),
             'amount': float(amount),
