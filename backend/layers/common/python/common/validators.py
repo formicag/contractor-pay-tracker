@@ -886,16 +886,36 @@ def validate_contractor_name(contractor_name: str, umbrella_id: str, dynamodb_cl
     print(f"[VALIDATE_CONTRACTOR_NAME] Querying contractors for umbrella: {umbrella_id}")
 
     try:
+        # Query GSI1 for contractor-umbrella associations
         response = dynamodb_client.table.query(
-            IndexName='GSI3',
-            KeyConditionExpression='GSI3PK = :pk',
+            IndexName='GSI1',
+            KeyConditionExpression='GSI1PK = :pk',
             ExpressionAttributeValues={
                 ':pk': f'UMBRELLA#{umbrella_id}'
             }
         )
 
-        contractors = response.get('Items', [])
-        print(f"[VALIDATE_CONTRACTOR_NAME] Found {len(contractors)} contractors for umbrella {umbrella_id}")
+        associations = response.get('Items', [])
+        print(f"[VALIDATE_CONTRACTOR_NAME] Found {len(associations)} contractor associations for umbrella {umbrella_id}")
+
+        # Extract contractor IDs from associations and load contractor profiles
+        contractors = []
+        for assoc in associations:
+            contractor_id = assoc.get('ContractorID')
+            if contractor_id:
+                # Load contractor PROFILE record
+                contractor_response = dynamodb_client.table.get_item(
+                    Key={'PK': f'CONTRACTOR#{contractor_id}', 'SK': 'PROFILE'}
+                )
+                if 'Item' in contractor_response:
+                    contractor = contractor_response['Item']
+                    # Build ContractorName from FirstName + LastName
+                    first_name = contractor.get('FirstName', '')
+                    last_name = contractor.get('LastName', '')
+                    contractor['ContractorName'] = f"{first_name} {last_name}".strip()
+                    contractors.append(contractor)
+
+        print(f"[VALIDATE_CONTRACTOR_NAME] Loaded {len(contractors)} contractor profiles")
 
         if not contractors:
             print(f"[VALIDATE_CONTRACTOR_NAME] No contractors found for umbrella")
