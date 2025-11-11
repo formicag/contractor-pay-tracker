@@ -1,7 +1,7 @@
 # Contractor Pay Tracker - TODO List
 
-**Last Updated**: 2025-11-10
-**Current Status**: ✅ All critical bugs fixed, AWS tagging implemented, system operational
+**Last Updated**: 2025-11-11
+**Current Status**: ⚠️ Infrastructure fixed, pipeline operational, blocked on data seeding
 
 ---
 
@@ -14,8 +14,7 @@
 - [x] Implement contractor fuzzy matching
 - [x] Build validation engine
 - [x] Implement DynamoDB storage
-- [x] Set up Step Functions workflow
-- [x] Deploy all 5 Lambda functions
+- [x] Deploy Lambda functions with SQS event sources
 
 ### Phase 2: Bug Fixes (DONE)
 - [x] Fix umbrella company determination bug
@@ -32,21 +31,52 @@
 - [x] Generate comprehensive tagging documentation
 - [x] Deploy updated Terraform configuration
 
+### Phase 4: SQS Pipeline Infrastructure Fixes (DONE - 2025-11-11)
+- [x] Fix Lambda environment variable bug (TABLE_NAME literal string)
+- [x] Fix Lambda layer directory structure (python/ at root)
+- [x] Deploy Lambda layer v36 with correct structure
+- [x] Fix GSI3→GSI1 bug in contractor validation
+- [x] Add detailed logging to validation stage
+- [x] Fix Excel parser field mapping (contractor_name, pay_rate, units)
+- [x] Identify contractor PROFILE records missing (root blocker)
+- [x] Identify Flask API field name bug (CompanyName→LegalName)
+- [x] Update project documentation (PROJECT_CONTEXT.md, TODO.md)
+
 ---
 
-## Next Features (Prioritized)
+## In Progress 🚧
 
-### HIGH PRIORITY: User-Requested Features
-(Add your features here as we discuss them)
+### CRITICAL: Data Seeding Blockers (P0)
+- [ ] **Fix contractor PROFILE records in seed_dynamodb.py**
+  - **What**: Update seeding script to create contractor PROFILE records
+  - **Why**: Validation fails without these records - blocks all processing
+  - **Effort**: Small (add PROFILE creation loop)
+  - **Priority**: P0 - BLOCKER
+  - **Location**: `backend/seed-data/seed_dynamodb.py`
+  - **Status**: Identified, not yet fixed
 
-**Example format:**
-```markdown
-- [ ] Feature name
-  - Description: What this feature does
-  - Why: Business value
-  - Estimated effort: Small/Medium/Large
-  - Dependencies: What needs to be done first
-```
+- [ ] **Fix Flask API field name bug**
+  - **What**: Change `item.get('CompanyName')` to `item.get('LegalName')`
+  - **Why**: User explicitly asked why umbrella data not showing
+  - **Effort**: Trivial (single line change)
+  - **Priority**: P0 - User requested
+  - **Location**: `flask-app/app.py:~2487`
+  - **Status**: Identified, not yet fixed
+
+### User-Requested Testing (P0)
+- [ ] **Test complete end-to-end flow with test file**
+  - **What**: Upload test file, verify validation passes, verify TimeRecords created
+  - **Why**: Validate all infrastructure fixes work together
+  - **Effort**: Small (single test upload)
+  - **Priority**: P0 - Blocked by seeding fix
+  - **Dependencies**: Fix contractor PROFILE records first
+
+- [ ] **Process all 48 production files from InputData/**
+  - **What**: Upload all 48 Excel files and verify processing
+  - **Why**: User's primary request - "count shld be the number of foles in this directory"
+  - **Effort**: Medium (bulk upload + monitoring)
+  - **Priority**: P0 - User requested
+  - **Dependencies**: Fix contractor PROFILE records + verify single file first
 
 ---
 
