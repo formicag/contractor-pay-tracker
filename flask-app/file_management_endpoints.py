@@ -1,254 +1,185 @@
 """
-File Management API Endpoints for Debugging Interface
+File Management API Endpoints
 
-These endpoints provide:
-1. File listing with ordering and filtering
-2. Navigation support (previous/next file IDs)
-3. Comprehensive file deletion (S3 + DynamoDB)
+Provides API endpoints for file listing, navigation, and deletion
 """
 
-# Add these endpoints to flask-app/app.py after the /api/files endpoint
+from flask import request, jsonify
+import logging
 
+def register_file_endpoints(app, payfiles_table, s3_client):
+    """Register file management endpoints with the Flask app"""
 
-@app.route('/api/files/list', methods=['GET'])
-def api_files_list():
-    """
-    API endpoint to list all files with ordering and filtering
+    @app.route('/api/files/list', methods=['GET'])
+    def api_files_list():
+        """
+        List all payfiles from DynamoDB
 
-    Query Parameters:
-        - status: Filter by status (COMPLETED, ERROR, FAILED, PROCESSING)
-        - umbrella_code: Filter by umbrella company code
-        - order: Sort order (asc/desc, default: asc for oldest first)
+        Query Parameters:
+            - status: Filter by status
+            - umbrella: Filter by umbrella company
+            - order: Sort order (asc/desc, default: desc for newest first)
 
-    Returns: JSON with ordered files array and total count
-    """
-    try:
-        # Get query parameters
-        status_filter = request.args.get('status')
-        umbrella_filter = request.args.get('umbrella_code')
-        order = request.args.get('order', 'asc')  # Default to oldest first
+        Returns: JSON with files array and total count
+        """
+        try:
+            # Get query parameters
+            status_filter = request.args.get('status')
+            umbrella_filter = request.args.get('umbrella')
+            order = request.args.get('order', 'desc')  # Default to newest first
 
-        # Build filter expression
-        filter_expr = 'EntityType = :et'
-        expression_values = {':et': 'File'}
-        expression_names = {}
+            app.logger.info(f"Listing files: status={status_filter}, umbrella={umbrella_filter}, order={order}")
 
-        # Add status filter if provided
-        if status_filter:
-            filter_expr += ' AND #status = :status'
-            expression_values[':status'] = status_filter
-            expression_names['#status'] = 'Status'
+            # Scan all files (excluding umbrella company reference data)
+            scan_kwargs = {}
 
-        # Add umbrella filter if provided
-        if umbrella_filter:
-            filter_expr += ' AND UmbrellaCode = :umbrella'
-            expression_values[':umbrella'] = umbrella_filter
+            # Build filter expression
+            filter_parts = []
+            expression_values = {}
 
-        # Query DynamoDB for File records
-        scan_kwargs = {
-            'FilterExpression': filter_expr,
-            'ExpressionAttributeValues': expression_values
-        }
+            # Exclude umbrella company data
+            filter_parts.append('NOT begins_with(file_id, :umbrella_prefix)')
+            expression_values[':umbrella_prefix'] = 'UMBRELLA#'
 
-        # Add ExpressionAttributeNames if status filter is used (reserved keyword)
-        if expression_names:
-            scan_kwargs['ExpressionAttributeNames'] = expression_names
+            # Add status filter
+            if status_filter:
+                filter_parts.append('#status = :status')
+                expression_values[':status'] = status_filter
+                scan_kwargs['ExpressionAttributeNames'] = {'#status': 'status'}
 
-        response = table.scan(**scan_kwargs)
+            # Add umbrella filter
+            if umbrella_filter:
+                filter_parts.append('umbrella_company = :umbrella')
+                expression_values[':umbrella'] = umbrella_filter
 
-        files_list = []
-        for item in response.get('Items', []):
-            file_data = {
-                'file_id': item.get('FileID'),
-                'filename': item.get('OriginalFilename', 'Unknown'),
-                'status': item.get('Status', 'UNKNOWN'),
-                'uploaded_at': item.get('UploadedAt', item.get('CreatedAt', '')),
-                'umbrella_code': item.get('UmbrellaCode', 'Unknown')
-            }
-            files_list.append(file_data)
+            if filter_parts:
+                scan_kwargs['FilterExpression'] = ' AND '.join(filter_parts)
+                scan_kwargs['ExpressionAttributeValues'] = expression_values
 
-        # Sort by UploadedAt timestamp
-        reverse_sort = (order == 'desc')
-        files_list.sort(key=lambda x: x.get('uploaded_at', ''), reverse=reverse_sort)
+            # Scan table
+            response = payfiles_table.scan(**scan_kwargs)
+            items = response.get('Items', [])
 
-        return jsonify({
-            'files': files_list,
-            'total': len(files_list)
-        })
+            # Handle pagination
+            while 'LastEvaluatedKey' in response:
+                scan_kwargs['ExclusiveStartKey'] = response['LastEvaluatedKey']
+                response = payfiles_table.scan(**scan_kwargs)
+                items.extend(response.get('Items', []))
 
-    except Exception as e:
-        app.logger.error(f"Error listing files: {str(e)}")
-        return jsonify({'error': 'Failed to list files', 'message': str(e)}), 500
+            # Format files for frontend
+            files_list = []
+            for item in items:
+                file_data = {
+                    'file_id': item.get('file_id', 'Unknown'),
+                    'filename': item.get('filename', 'Unknown'),
+                    'status': item.get('status', 'unknown'),
+                    'contractor_name': item.get('contractor_name', 'Unknown'),
+                    'umbrella_company': item.get('umbrella_company', 'Unknown'),
+                    'uploaded_at': item.get('uploaded_at', 0),
+                    'created_at': item.get('created_at', 0),
+                    'processing_status': item.get('processing_status', 'unknown'),
+                    'file_size': item.get('file_size', 0)
+                }
+                files_list.append(file_data)
 
+            # Sort files by uploaded_at timestamp
+            reverse_sort = (order == 'desc')
+            files_list.sort(key=lambda x: int(x.get('uploaded_at', 0) or 0), reverse=reverse_sort)
 
-@app.route('/api/files/<file_id>/navigation', methods=['GET'])
-def api_file_navigation(file_id):
-    """
-    API endpoint to get navigation info (previous/next file IDs)
+            app.logger.info(f"Found {len(files_list)} files")
 
-    Returns: JSON with previous and next file IDs, current index, and total
-    """
-    try:
-        # Get query parameters for filtering
-        status_filter = request.args.get('status')
-        umbrella_filter = request.args.get('umbrella_code')
-
-        # Build filter expression (same as list endpoint)
-        filter_expr = 'EntityType = :et'
-        expression_values = {':et': 'File'}
-        expression_names = {}
-
-        if status_filter:
-            filter_expr += ' AND #status = :status'
-            expression_values[':status'] = status_filter
-            expression_names['#status'] = 'Status'
-
-        if umbrella_filter:
-            filter_expr += ' AND UmbrellaCode = :umbrella'
-            expression_values[':umbrella'] = umbrella_filter
-
-        # Query DynamoDB
-        scan_kwargs = {
-            'FilterExpression': filter_expr,
-            'ExpressionAttributeValues': expression_values
-        }
-
-        if expression_names:
-            scan_kwargs['ExpressionAttributeNames'] = expression_names
-
-        response = table.scan(**scan_kwargs)
-
-        # Build and sort file list (oldest first)
-        files_list = []
-        for item in response.get('Items', []):
-            files_list.append({
-                'file_id': item.get('FileID'),
-                'uploaded_at': item.get('UploadedAt', item.get('CreatedAt', ''))
+            return jsonify({
+                'files': files_list,
+                'total': len(files_list)
             })
 
-        files_list.sort(key=lambda x: x.get('uploaded_at', ''))
-
-        # Find current file index
-        current_index = None
-        for idx, file_item in enumerate(files_list):
-            if file_item['file_id'] == file_id:
-                current_index = idx
-                break
-
-        if current_index is None:
-            return jsonify({'error': 'File not found'}), 404
-
-        # Get previous and next file IDs
-        previous_id = files_list[current_index - 1]['file_id'] if current_index > 0 else None
-        next_id = files_list[current_index + 1]['file_id'] if current_index < len(files_list) - 1 else None
-
-        return jsonify({
-            'previous': previous_id,
-            'next': next_id,
-            'current_index': current_index + 1,  # 1-indexed for display
-            'total': len(files_list)
-        })
-
-    except Exception as e:
-        app.logger.error(f"Error getting file navigation: {str(e)}")
-        return jsonify({'error': 'Failed to get navigation info', 'message': str(e)}), 500
+        except Exception as e:
+            app.logger.error(f"Error listing files: {str(e)}")
+            import traceback
+            app.logger.error(traceback.format_exc())
+            return jsonify({'error': 'Failed to list files', 'message': str(e)}), 500
 
 
-# UPDATE THE EXISTING DELETE ENDPOINT TO:
+    @app.route('/api/files/<file_id>', methods=['GET'])
+    def api_get_file(file_id):
+        """Get a single file's details"""
+        try:
+            response = payfiles_table.get_item(Key={'file_id': file_id})
 
-@app.route('/api/files/<file_id>', methods=['DELETE'])
-def api_delete_file(file_id):
-    """
-    API endpoint to delete a file comprehensively
+            if 'Item' not in response:
+                return jsonify({'error': 'File not found'}), 404
 
-    Deletes:
-    - S3 file from bucket
-    - File metadata record (PK=FILE#{file_id}, SK=METADATA)
-    - All PayRecord entries for this file
-    - All ValidationError records
-    - All ValidationWarning records
+            item = response['Item']
 
-    Returns: JSON with success status
-    """
-    try:
-        app.logger.info(f"Starting deletion of file: {file_id}")
-
-        # 1. Get file metadata to get S3 location
-        file_response = table.get_item(
-            Key={
-                'PK': f'FILE#{file_id}',
-                'SK': 'METADATA'
+            file_data = {
+                'file_id': item.get('file_id'),
+                'filename': item.get('filename'),
+                'status': item.get('status'),
+                'contractor_name': item.get('contractor_name', 'Unknown'),
+                'umbrella_company': item.get('umbrella_company'),
+                'uploaded_at': item.get('uploaded_at'),
+                'created_at': item.get('created_at'),
+                'processing_status': item.get('processing_status'),
+                'file_size': item.get('file_size'),
+                's3_bucket': item.get('s3_bucket'),
+                's3_key': item.get('s3_key')
             }
-        )
 
-        if 'Item' not in file_response:
-            return jsonify({'error': 'File not found'}), 404
+            return jsonify(file_data)
 
-        file_item = file_response['Item']
-        s3_bucket = file_item.get('S3Bucket')
-        s3_key = file_item.get('S3Key')
+        except Exception as e:
+            app.logger.error(f"Error getting file {file_id}: {str(e)}")
+            return jsonify({'error': 'Failed to get file', 'message': str(e)}), 500
 
-        deletion_summary = {
-            'file_id': file_id,
-            'filename': file_item.get('OriginalFilename'),
-            's3_deleted': False,
-            'metadata_deleted': False,
-            'payrecords_deleted': 0,
-            'errors_deleted': 0,
-            'warnings_deleted': 0
-        }
 
-        # 2. Delete from S3
-        if s3_bucket and s3_key:
+    @app.route('/api/files/<file_id>', methods=['DELETE'])
+    def api_delete_file(file_id):
+        """Delete a file from S3 and DynamoDB"""
+        try:
+            app.logger.info(f"Deleting file: {file_id}")
+
+            # Get file metadata first
+            response = payfiles_table.get_item(Key={'file_id': file_id})
+
+            if 'Item' not in response:
+                return jsonify({'error': 'File not found'}), 404
+
+            item = response['Item']
+            s3_bucket = item.get('s3_bucket')
+            s3_key = item.get('s3_key')
+
+            deletion_summary = {
+                'file_id': file_id,
+                'filename': item.get('filename'),
+                's3_deleted': False,
+                'db_deleted': False
+            }
+
+            # Delete from S3
+            if s3_bucket and s3_key:
+                try:
+                    s3_client.delete_object(Bucket=s3_bucket, Key=s3_key)
+                    deletion_summary['s3_deleted'] = True
+                    app.logger.info(f"Deleted from S3: s3://{s3_bucket}/{s3_key}")
+                except Exception as e:
+                    app.logger.error(f"Failed to delete from S3: {str(e)}")
+
+            # Delete from DynamoDB
             try:
-                s3_client.delete_object(Bucket=s3_bucket, Key=s3_key)
-                deletion_summary['s3_deleted'] = True
-                app.logger.info(f"Deleted S3 object: s3://{s3_bucket}/{s3_key}")
-            except ClientError as e:
-                app.logger.error(f"Error deleting S3 object: {str(e)}")
-                # Continue with DynamoDB deletion even if S3 fails
+                payfiles_table.delete_item(Key={'file_id': file_id})
+                deletion_summary['db_deleted'] = True
+                app.logger.info(f"Deleted from DynamoDB: {file_id}")
+            except Exception as e:
+                app.logger.error(f"Failed to delete from DynamoDB: {str(e)}")
+                raise
 
-        # 3. Query all records for this file (PayRecords, Errors, Warnings)
-        records_response = table.query(
-            KeyConditionExpression=Key('PK').eq(f'FILE#{file_id}')
-        )
+            return jsonify({
+                'message': 'File deleted successfully',
+                'deleted': deletion_summary
+            })
 
-        # 4. Batch delete all records
-        items_to_delete = records_response.get('Items', [])
-
-        with table.batch_writer() as batch:
-            for item in items_to_delete:
-                pk = item['PK']
-                sk = item['SK']
-                entity_type = item.get('EntityType', '')
-
-                # Delete the item
-                batch.delete_item(Key={'PK': pk, 'SK': sk})
-
-                # Track what was deleted
-                if sk == 'METADATA':
-                    deletion_summary['metadata_deleted'] = True
-                elif entity_type == 'PayRecord':
-                    deletion_summary['payrecords_deleted'] += 1
-                elif entity_type == 'ValidationError':
-                    deletion_summary['errors_deleted'] += 1
-                elif entity_type == 'ValidationWarning':
-                    deletion_summary['warnings_deleted'] += 1
-
-                app.logger.info(f"Deleted {entity_type}: {pk} / {sk}")
-
-        app.logger.info(f"File deletion complete: {deletion_summary}")
-
-        return jsonify({
-            'message': 'File deleted successfully',
-            'deleted': deletion_summary
-        })
-
-    except ClientError as e:
-        app.logger.error(f"DynamoDB error deleting file: {str(e)}")
-        return jsonify({'error': 'Database error', 'message': str(e)}), 500
-    except Exception as e:
-        app.logger.error(f"Error deleting file: {str(e)}")
-        import traceback
-        app.logger.error(traceback.format_exc())
-        return jsonify({'error': 'Failed to delete file', 'message': str(e)}), 500
+        except Exception as e:
+            app.logger.error(f"Error deleting file {file_id}: {str(e)}")
+            import traceback
+            app.logger.error(traceback.format_exc())
+            return jsonify({'error': 'Failed to delete file', 'message': str(e)}), 500

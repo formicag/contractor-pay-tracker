@@ -41,6 +41,7 @@ AWS_REGION = os.environ.get('AWS_REGION', 'eu-west-2')
 AWS_PROFILE = os.environ.get('AWS_PROFILE', 'AdministratorAccess-016164185850')
 S3_BUCKET = os.environ.get('S3_BUCKET_NAME', '')
 DYNAMODB_TABLE = os.environ.get('DYNAMODB_TABLE_NAME', '')
+PAYFILES_TABLE = os.environ.get('PAYFILES_TABLE_NAME', '')
 FILE_PROCESSOR_ARN = os.environ.get('FILE_PROCESSOR_ARN', '')
 
 # Initialize AWS clients
@@ -49,6 +50,12 @@ s3_client = session.client('s3')
 dynamodb = session.resource('dynamodb')
 lambda_client = session.client('lambda')
 table = dynamodb.Table(DYNAMODB_TABLE) if DYNAMODB_TABLE else None
+payfiles_table = dynamodb.Table(PAYFILES_TABLE) if PAYFILES_TABLE else None
+
+# Register file management endpoints
+from file_management_endpoints import register_file_endpoints
+if payfiles_table:
+    register_file_endpoints(app, payfiles_table, s3_client)
 
 
 def calculate_margin(sell_rate, buy_rate):
@@ -214,29 +221,88 @@ def api_upload():
     """
     API endpoint for file upload
 
+    Uploads contractor pay file to S3 and creates metadata in DynamoDB
+
     Expected: multipart/form-data with file
     Returns: JSON with file_id and status
     """
-    if 'file' not in request.files:
-        return jsonify({'error': 'No file provided'}), 400
+    try:
+        if 'file' not in request.files:
+            return jsonify({'error': 'No file provided'}), 400
 
-    file = request.files['file']
+        file = request.files['file']
 
-    if file.filename == '':
-        return jsonify({'error': 'No file selected'}), 400
+        if file.filename == '':
+            return jsonify({'error': 'No file selected'}), 400
 
-    if not file.filename.endswith('.xlsx'):
-        return jsonify({'error': 'Only .xlsx files are supported'}), 400
+        if not file.filename.endswith('.xlsx'):
+            return jsonify({'error': 'Only .xlsx files are supported'}), 400
 
-    # TODO: Implement S3 upload via Lambda
-    # For now, return mock response
+        # Generate unique file ID with timestamp
+        import time
+        timestamp = int(time.time())
+        file_id = f"{file.filename.replace('.xlsx', '')}_{timestamp}"
+        s3_key = f"production/{file.filename}"
 
-    return jsonify({
-        'message': 'File upload endpoint ready',
-        'filename': file.filename,
-        'size': len(file.read()),
-        'status': 'pending'
-    })
+        # Read file content
+        file_content = file.read()
+        file_size = len(file_content)
+
+        # Upload to S3
+        s3_client.put_object(
+            Bucket=S3_BUCKET,
+            Key=s3_key,
+            Body=file_content,
+            ContentType='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+        )
+
+        # Extract umbrella company from filename
+        umbrella_company = file.filename.split(' ')[0] if ' ' in file.filename else 'Unknown'
+
+        # Extract contractor names from Excel file
+        from excel_processor import extract_contractor_names, get_contractor_summary
+        contractor_names = extract_contractor_names(file_content)
+        contractor_name = get_contractor_summary(contractor_names)
+
+        app.logger.info(f"Extracted {len(contractor_names)} contractors from {file.filename}: {contractor_names}")
+
+        # Create File metadata record in DynamoDB payfiles table
+        payfiles_table.put_item(
+            Item={
+                'file_id': file_id,
+                'filename': file.filename,
+                's3_key': s3_key,
+                's3_bucket': S3_BUCKET,
+                'file_size': file_size,
+                'umbrella_company': umbrella_company,
+                'contractor_name': contractor_name,
+                'contractor_names_list': contractor_names,  # Store full list
+                'contractor_count': len(contractor_names),
+                'uploaded_at': timestamp,
+                'status': 'uploaded',
+                'processing_status': 'completed' if contractor_names else 'failed',
+                'created_at': timestamp,
+                'updated_at': timestamp
+            }
+        )
+
+        app.logger.info(f"File uploaded successfully: {file_id} -> s3://{S3_BUCKET}/{s3_key}")
+
+        return jsonify({
+            'message': 'File uploaded successfully',
+            'file_id': file_id,
+            'filename': file.filename,
+            'size': file_size,
+            'umbrella_company': umbrella_company,
+            's3_key': s3_key,
+            'status': 'uploaded'
+        })
+
+    except Exception as e:
+        app.logger.error(f"Error uploading file: {str(e)}")
+        import traceback
+        app.logger.error(traceback.format_exc())
+        return jsonify({'error': 'Failed to upload file', 'message': str(e)}), 500
 
 
 @app.route('/api/files', methods=['GET'])
@@ -247,217 +313,40 @@ def api_files():
     Returns: JSON with files list
     """
     try:
-        # First, load all Period records for date lookup
-        periods_response = table.scan(
-            FilterExpression='EntityType = :et',
-            ExpressionAttributeValues={':et': 'Period'}
-        )
-
-        # Create period lookup dict
-        periods_dict = {}
-        for period_item in periods_response.get('Items', []):
-            period_id = period_item.get('PeriodNumber')
-            if period_id:
-                start_date = period_item.get('WorkStartDate', '')
-                end_date = period_item.get('WorkEndDate', '')
-                periods_dict[period_id] = {
-                    'start': start_date,
-                    'end': end_date
-                }
-
-        # Query DynamoDB for all File records
-        response = table.scan(
-            FilterExpression='EntityType = :et',
-            ExpressionAttributeValues={':et': 'File'}
-        )
+        # Query DynamoDB payfiles table for all uploaded files
+        response = payfiles_table.scan()
 
         files_list = []
         for item in response.get('Items', []):
-            file_id = item.get('FileID')
+            # Skip umbrella company reference data
+            if item.get('file_id', '').startswith('UMBRELLA#'):
+                continue
 
-            # Get period from PayRecords for this file
-            period_display = 'N/A'
-            if file_id:
-                try:
-                    # Query PayRecords for this file (they use PK = FILE#{file_id})
-                    payrecord_response = table.query(
-                        KeyConditionExpression=Key('PK').eq(f'FILE#{file_id}') & Key('SK').begins_with('RECORD#'),
-                        Limit=1
-                    )
-
-                    if payrecord_response.get('Items'):
-                        period_id = payrecord_response['Items'][0].get('PeriodID', 'N/A')
-
-                        # Look up period dates
-                        if period_id in periods_dict:
-                            period_info = periods_dict[period_id]
-                            start = period_info['start']
-                            end = period_info['end']
-
-                            # Format as "2 Jun - 29 Jun 2025"
-                            if start and end:
-                                from datetime import datetime
-                                start_dt = datetime.fromisoformat(start)
-                                end_dt = datetime.fromisoformat(end)
-                                # Use .day to avoid platform-specific strftime issues
-                                period_display = f"{start_dt.day} {start_dt.strftime('%b')} - {end_dt.day} {end_dt.strftime('%b %Y')}"
-                            else:
-                                period_display = f"Period {period_id}"
-                        else:
-                            period_display = f"Period {period_id}" if period_id != 'N/A' else 'N/A'
-                except:
-                    pass  # If query fails, keep period as N/A
-
-            # Extract file info
+            # Extract file info from new schema
             file_data = {
-                'file_id': file_id,
-                'filename': item.get('OriginalFilename', 'Unknown'),
-                'umbrella': item.get('UmbrellaCode', 'Unknown'),
-                'period': period_display,
-                'status': item.get('Status', 'UNKNOWN'),
-                'uploaded_at': item.get('UploadedAt', item.get('CreatedAt', '')),
-                'records': item.get('ValidRecords', 0)
+                'file_id': item.get('file_id'),
+                'filename': item.get('filename', 'Unknown'),
+                'contractor_name': item.get('contractor_name', 'Unknown'),
+                'umbrella_company': item.get('umbrella_company', 'Unknown'),
+                'status': item.get('status', 'uploaded'),
+                'processing_status': item.get('processing_status', 'pending'),
+                'uploaded_at': item.get('uploaded_at', item.get('created_at', '')),
+                'file_size': item.get('file_size', 0),
+                's3_key': item.get('s3_key', '')
             }
-
-            # Add warnings/errors if present
-            if item.get('TotalWarnings', 0) > 0:
-                file_data['warnings'] = item.get('TotalWarnings')
-            if item.get('TotalErrors', 0) > 0:
-                file_data['errors'] = item.get('TotalErrors')
 
             files_list.append(file_data)
 
         # Sort by upload date (newest first)
-        files_list.sort(key=lambda x: x.get('uploaded_at', ''), reverse=True)
+        files_list.sort(key=lambda x: x.get('uploaded_at', 0), reverse=True)
 
-        return jsonify({'files': files_list})
+        return jsonify({'files': files_list, 'total': len(files_list)})
 
     except Exception as e:
-        logger.error(f"Error fetching files: {str(e)}")
+        app.logger.error(f"Error fetching files: {str(e)}")
         return jsonify({'error': 'Failed to fetch files', 'message': str(e)}), 500
 
-
-@app.route('/api/file/<file_id>', methods=['GET'])
-def api_file_detail(file_id):
-    """
-    API endpoint to get file details
-
-    Returns: JSON with file metadata and validation results
-    """
-    # TODO: Query DynamoDB for file details
-
-    # Mock data
-    mock_file = {
-        'file_id': file_id,
-        'filename': 'NASA_GCI_Nasstar_Contractor_Pay_01092025.xlsx',
-        'umbrella': 'NASA',
-        'period': 8,
-        'status': 'COMPLETED',
-        'uploaded_at': '2025-09-01T14:30:00Z',
-        'total_records': 14,
-        'valid_records': 14,
-        'errors': [],
-        'warnings': []
-    }
-
-    return jsonify(mock_file)
-
-
-@app.route('/api/file/<file_id>', methods=['DELETE'])
-def api_delete_file(file_id):
-    """
-    API endpoint to delete a file completely (hard delete)
-    Removes: S3 file, File metadata, PayRecords, ValidationErrors, ValidationWarnings
-
-    Returns: JSON with success status
-    """
-    try:
-        app.logger.info(f"Deleting file {file_id} and all associated data")
-
-        # Get file metadata to find S3 location
-        file_response = table.get_item(
-            Key={'PK': f'FILE#{file_id}', 'SK': 'METADATA'}
-        )
-
-        if 'Item' not in file_response:
-            return jsonify({'error': 'File not found'}), 404
-
-        file_metadata = file_response['Item']
-        s3_bucket = file_metadata.get('S3Bucket', S3_BUCKET)
-        s3_key = file_metadata.get('S3Key')
-
-        # Delete S3 file
-        if s3_key:
-            try:
-                s3_client.delete_object(Bucket=s3_bucket, Key=s3_key)
-                app.logger.info(f"Deleted S3 object: {s3_bucket}/{s3_key}")
-            except Exception as e:
-                app.logger.error(f"Error deleting S3 object: {str(e)}")
-
-        # Query all items with PK = FILE#{file_id}
-        response = table.query(
-            KeyConditionExpression=Key('PK').eq(f'FILE#{file_id}')
-        )
-
-        # Delete all items in batch
-        with table.batch_writer() as batch:
-            for item in response.get('Items', []):
-                batch.delete_item(
-                    Key={
-                        'PK': item['PK'],
-                        'SK': item['SK']
-                    }
-                )
-
-        app.logger.info(f"Deleted {len(response.get('Items', []))} items from DynamoDB for file {file_id}")
-
-        return jsonify({
-            'success': True,
-            'message': f'File {file_id} deleted successfully',
-            'items_deleted': len(response.get('Items', []))
-        })
-
-    except Exception as e:
-        app.logger.error(f"Error deleting file {file_id}: {str(e)}")
-        return jsonify({'error': 'Failed to delete file', 'message': str(e)}), 500
-
-
-@app.route('/api/files/list', methods=['GET'])
-def api_files_list():
-    """
-    API endpoint to list all files ordered by upload timestamp (oldest first)
-
-    Returns: JSON with files list
-    """
-    try:
-        # Query DynamoDB for all File records
-        response = table.scan(
-            FilterExpression='EntityType = :et',
-            ExpressionAttributeValues={':et': 'File'}
-        )
-
-        files_list = []
-        for item in response.get('Items', []):
-            file_data = {
-                'file_id': item.get('FileID'),
-                'filename': item.get('OriginalFilename', 'Unknown'),
-                'uploaded_at': item.get('UploadedAt', item.get('CreatedAt', '')),
-                'status': item.get('Status', 'UNKNOWN'),
-                'umbrella_code': item.get('UmbrellaCode'),
-                'umbrella_name': item.get('UmbrellaName'),
-                'period_start': item.get('PeriodStart'),
-                'period_end': item.get('PeriodEnd')
-            }
-            files_list.append(file_data)
-
-        # Sort by upload date (oldest first) for systematic review
-        files_list.sort(key=lambda x: x.get('uploaded_at', ''))
-
-        return jsonify({'files': files_list, 'count': len(files_list)})
-
-    except Exception as e:
-        app.logger.error(f"Error fetching files list: {str(e)}")
-        return jsonify({'error': 'Failed to fetch files', 'message': str(e)}), 500
+# Old broken endpoints removed - replaced by file_management_endpoints.py
 
 
 @app.route('/api/files/<file_id>/navigation', methods=['GET'])
@@ -811,56 +700,41 @@ def api_contractors():
     Returns: JSON with contractors list
     """
     try:
-        # Query DynamoDB for all Contractor records (METADATA only, not PROFILE or SNAPSHOT)
+        # Query DynamoDB for Umbrella Company contractors from report-guardian-api-dev-resources table
         response = table.scan(
-            FilterExpression='EntityType = :et AND SK = :sk',
+            FilterExpression='engagement_type = :umbrella',
             ExpressionAttributeValues={
-                ':et': 'Contractor',
-                ':sk': 'METADATA'
+                ':umbrella': 'Umbrella Company (PAYE)'
             }
         )
 
         contractors_list = []
         for item in response.get('Items', []):
-            # Skip permanent staff - only display contractors
-            if item.get('IsPermanentStaff', False):
-                continue
+            # Convert Decimal to float for day_rate_gbp
+            day_rate = float(item.get('day_rate_gbp', 0))
 
-            sell_rate = float(item.get('SellRate', 0))
-            buy_rate = float(item.get('BuyRate', 0))
-
-            # Get margin from DB if available, otherwise calculate
-            margin = item.get('Margin')
-            margin_percent = item.get('MarginPercent')
-
-            if margin is None or margin_percent is None:
-                # Calculate margin if not in database
-                if sell_rate > 0 and sell_rate > buy_rate:
-                    margin = sell_rate - buy_rate
-                    margin_percent = ((sell_rate - buy_rate) / sell_rate) * 100
-                else:
-                    margin = 0
-                    margin_percent = 0
-            else:
-                margin = float(margin)
-                margin_percent = float(margin_percent)
-
-            # Use Email or ResourceContactEmail (backward compatibility)
-            email = item.get('Email') or item.get('ResourceContactEmail', '')
+            # For umbrella contractors, we don't have buy rate in this table
+            # Assume 80% margin as placeholder (can be updated later)
+            sell_rate = day_rate
+            buy_rate = day_rate * 0.8
+            margin = sell_rate - buy_rate
+            margin_percent = 20.0 if sell_rate > 0 else 0
 
             contractor_data = {
-                'contractor_id': item.get('ContractorID'),
-                'email': email,
-                'first_name': item.get('FirstName', ''),
-                'last_name': item.get('LastName', ''),
-                'full_name': f"{item.get('FirstName', '')} {item.get('LastName', '')}".strip(),
-                'job_title': item.get('JobTitle', 'N/A'),
+                'contractor_id': str(item.get('resource_id', '')),
+                'email': item.get('line_manager_email', ''),  # Using line manager email as contact
+                'first_name': item.get('first_name', ''),
+                'last_name': item.get('last_name', ''),
+                'full_name': f"{item.get('first_name', '')} {item.get('last_name', '')}".strip(),
+                'job_title': item.get('job_title', 'N/A'),
+                'umbrella_company': item.get('subcontractor_payroll_company', 'N/A'),
                 'sell_rate': sell_rate,
                 'buy_rate': buy_rate,
                 'margin': margin,
                 'margin_percent': margin_percent,
-                'is_active': item.get('IsActive', item.get('Status', 'ACTIVE') == 'ACTIVE'),
-                'created_at': item.get('CreatedAt', item.get('UpdatedAt', ''))
+                'is_active': item.get('is_active', True),
+                'created_at': item.get('assignment_start_date', ''),
+                'assignment_end_date': item.get('assignment_end_date', '')
             }
             contractors_list.append(contractor_data)
 
@@ -882,35 +756,31 @@ def api_perm_staff():
     Returns: JSON with permanent staff list
     """
     try:
-        # Query DynamoDB for all Contractor records with IsPermanentStaff=True
+        # Query DynamoDB for PAYE (on payroll) staff from report-guardian-api-dev-resources table
         response = table.scan(
-            FilterExpression='EntityType = :et AND SK = :sk AND IsPermanentStaff = :ps',
+            FilterExpression='engagement_type = :paye',
             ExpressionAttributeValues={
-                ':et': 'Contractor',
-                ':sk': 'METADATA',
-                ':ps': True
+                ':paye': 'PAYE (on payroll)'
             }
         )
 
         staff_list = []
         for item in response.get('Items', []):
-            sell_rate = float(item.get('SellRate', 0))
-
-            # Use Email or ResourceContactEmail (backward compatibility)
-            email = item.get('Email') or item.get('ResourceContactEmail', '')
+            # Convert Decimal to float for day_rate_gbp
+            day_rate = float(item.get('day_rate_gbp', 0))
 
             staff_data = {
-                'staff_id': item.get('ContractorID'),
-                'email': email,
-                'first_name': item.get('FirstName', ''),
-                'last_name': item.get('LastName', ''),
-                'full_name': f"{item.get('FirstName', '')} {item.get('LastName', '')}".strip(),
-                'job_title': item.get('JobTitle', 'N/A'),
-                'customer': item.get('Customer', ''),
-                'engagement_type': item.get('EngagementType', 'PAYE'),
-                'sell_rate': sell_rate,
-                'is_active': item.get('IsActive', item.get('Status', 'ACTIVE') == 'ACTIVE'),
-                'created_at': item.get('CreatedAt', item.get('UpdatedAt', ''))
+                'staff_id': str(item.get('resource_id', '')),
+                'email': item.get('line_manager_email', ''),  # Using line manager email as contact
+                'first_name': item.get('first_name', ''),
+                'last_name': item.get('last_name', ''),
+                'full_name': f"{item.get('first_name', '')} {item.get('last_name', '')}".strip(),
+                'job_title': item.get('job_title', 'N/A'),
+                'customer': item.get('division', ''),  # Using division as customer
+                'engagement_type': item.get('engagement_type', 'PAYE'),
+                'sell_rate': day_rate,
+                'is_active': item.get('is_active', True),
+                'created_at': item.get('assignment_start_date', '')
             }
             staff_list.append(staff_data)
 
