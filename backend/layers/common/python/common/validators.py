@@ -900,20 +900,37 @@ def validate_contractor_name(contractor_name: str, umbrella_id: str, dynamodb_cl
 
         # Extract contractor IDs from associations and load contractor profiles
         contractors = []
-        for assoc in associations:
+        for idx, assoc in enumerate(associations):
+            print(f"[VALIDATE_CONTRACTOR_NAME] Processing association {idx+1}/{len(associations)}")
             contractor_id = assoc.get('ContractorID')
+            print(f"[VALIDATE_CONTRACTOR_NAME] ContractorID from association: {contractor_id}")
+
             if contractor_id:
                 # Load contractor PROFILE record
-                contractor_response = dynamodb_client.table.get_item(
-                    Key={'PK': f'CONTRACTOR#{contractor_id}', 'SK': 'PROFILE'}
-                )
-                if 'Item' in contractor_response:
-                    contractor = contractor_response['Item']
-                    # Build ContractorName from FirstName + LastName
-                    first_name = contractor.get('FirstName', '')
-                    last_name = contractor.get('LastName', '')
-                    contractor['ContractorName'] = f"{first_name} {last_name}".strip()
-                    contractors.append(contractor)
+                pk_key = f'CONTRACTOR#{contractor_id}'
+                print(f"[VALIDATE_CONTRACTOR_NAME] Looking up PK={pk_key}, SK=PROFILE")
+
+                try:
+                    contractor_response = dynamodb_client.table.get_item(
+                        Key={'PK': pk_key, 'SK': 'PROFILE'}
+                    )
+                    print(f"[VALIDATE_CONTRACTOR_NAME] get_item response keys: {list(contractor_response.keys())}")
+
+                    if 'Item' in contractor_response:
+                        contractor = contractor_response['Item']
+                        # Build ContractorName from FirstName + LastName
+                        first_name = contractor.get('FirstName', '')
+                        last_name = contractor.get('LastName', '')
+                        contractor_name = f"{first_name} {last_name}".strip()
+                        contractor['ContractorName'] = contractor_name
+                        contractors.append(contractor)
+                        print(f"[VALIDATE_CONTRACTOR_NAME] ✅ Loaded contractor: {contractor_name}")
+                    else:
+                        print(f"[VALIDATE_CONTRACTOR_NAME] ⚠️  No Item in response for {pk_key}")
+                except Exception as e:
+                    print(f"[VALIDATE_CONTRACTOR_NAME] ❌ Error loading contractor {contractor_id}: {type(e).__name__}: {str(e)}")
+            else:
+                print(f"[VALIDATE_CONTRACTOR_NAME] ⚠️  Association has no ContractorID field")
 
         print(f"[VALIDATE_CONTRACTOR_NAME] Loaded {len(contractors)} contractor profiles")
 
