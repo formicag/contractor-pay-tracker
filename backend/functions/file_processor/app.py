@@ -886,7 +886,7 @@ def import_records(event: dict, logger: StructuredLogger) -> dict:
             'AssociationID': association_id,
             'EmployeeID': record['employee_id'],
             'UnitDays': Decimal(str(record['unit_days'])),
-            'DayRate': Decimal(str(record['day_rate'])),
+            'SellRate': Decimal(str(record['sell_rate'])),
             'Amount': Decimal(str(record['amount'])),
             'VATAmount': Decimal(str(record['vat_amount'])),
             'GrossAmount': Decimal(str(record['gross_amount'])),

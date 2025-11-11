@@ -195,33 +195,75 @@
 {% block content %}
 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
     <h2>Umbrella Company Dashboard</h2>
-    <button class="btn" onclick="loadUmbrellaStats()">↻ Refresh</button>
+    <button class="btn" onclick="loadUmbrellaData()">↻ Refresh</button>
 </div>
 
-<!-- Summary Subtitle -->
-<div id="summary-subtitle" style="color: var(--text-secondary); font-size: 1rem; margin-bottom: 1rem; display: none;">
-    <strong style="color: var(--accent);" id="summary-files">0</strong> pay files from <strong style="color: var(--accent);" id="summary-umbrellas">0</strong> umbrella companies over past <strong style="color: var(--accent);" id="summary-months">0</strong> months for <strong style="color: var(--accent);" id="summary-contractors">0</strong> contractors
+<!-- Database Info -->
+<div style="background: var(--bg-secondary); border: 1px solid var(--border); border-radius: 0.5rem; padding: 1rem; margin-bottom: 1.5rem;">
+    <div style="font-size: 0.75rem; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 0.5rem;">Database ARN</div>
+    <div style="font-family: monospace; font-size: 0.875rem; color: var(--text-primary);" id="db-arn">Loading...</div>
 </div>
 
-<!-- Billing Summary -->
-<div id="billing-summary" style="background: var(--bg-secondary); border-left: 3px solid var(--accent); padding: 0.75rem 1rem; border-radius: 0.5rem; margin-bottom: 2rem; display: none;">
-    <p style="margin: 0; color: var(--text-secondary); font-size: 0.95rem;">
-        <strong style="color: var(--text-primary);">Billing Summary:</strong>
-        <span id="billing-text">Loading...</span>
-    </p>
-</div>
-
-<!-- Loading Overlay -->
-<div id="loading-overlay" class="loading-overlay" style="display: none;">
-    <div class="loading-content">
-        <div class="spinner"></div>
-        <p style="margin-top: 1rem;">Loading umbrella company data...</p>
+<!-- Summary Cards -->
+<div class="summary-grid" style="margin-bottom: 2rem;">
+    <div class="card">
+        <div class="card-header">Total Umbrellas</div>
+        <div class="card-value" id="total-umbrellas">0</div>
+        <div class="card-subtitle">Companies tracked</div>
+    </div>
+    <div class="card">
+        <div class="card-header">Total Files</div>
+        <div class="card-value" style="color: var(--accent);" id="total-files">0</div>
+        <div class="card-subtitle">Pay files processed</div>
+    </div>
+    <div class="card">
+        <div class="card-header">Total Contractors</div>
+        <div class="card-value" style="color: var(--success);" id="total-contractors">0</div>
+        <div class="card-subtitle">Active resources</div>
+    </div>
+    <div class="card">
+        <div class="card-header">Months Covered</div>
+        <div class="card-value" style="color: var(--warning);" id="total-months">0</div>
+        <div class="card-subtitle">Billing periods</div>
     </div>
 </div>
 
-<!-- Umbrellas Container -->
-<div id="umbrellas-container">
-    <div class="spinner"></div>
+<!-- Umbrella Companies Table -->
+<div class="table-container" style="overflow-x: auto;">
+    <table id="umbrellas-table" style="min-width: 5000px; width: max-content;">
+        <thead>
+            <tr>
+                <th>PK</th>
+                <th>SK</th>
+                <th>UmbrellaID</th>
+                <th>UmbrellaCode</th>
+                <th>FileNameVariation</th>
+                <th>LegalName</th>
+                <th>CompanyRegNo</th>
+                <th>VATNo</th>
+                <th>RegisteredAddress</th>
+                <th>Website</th>
+                <th>PrimaryContactEmail</th>
+                <th>Contacts</th>
+                <th>ContactCount</th>
+                <th>IsActive</th>
+                <th>EntityType</th>
+                <th>CreatedAt</th>
+                <th>UpdatedAt</th>
+                <th>GSI1PK</th>
+                <th>GSI1SK</th>
+                <th>GSI2PK</th>
+                <th>GSI2SK</th>
+            </tr>
+        </thead>
+        <tbody id="umbrellas-tbody">
+            <tr>
+                <td colspan="21" style="text-align: center; padding: 2rem;">
+                    <div class="spinner"></div>
+                </td>
+            </tr>
+        </tbody>
+    </table>
 </div>
 {% endblock %}
 
@@ -232,23 +274,30 @@
 
     // Load data on page load
     window.addEventListener('DOMContentLoaded', () => {
-        loadUmbrellaStats();
+        loadDatabaseInfo();
+        loadUmbrellaData();
     });
 
-    async function loadUmbrellaStats() {
-        const container = document.getElementById('umbrellas-container');
-        const overlay = document.getElementById('loading-overlay');
+    async function loadDatabaseInfo() {
+        try {
+            const response = await fetch('/api/database-info');
+            const data = await response.json();
+            document.getElementById('db-arn').textContent = data.table_arn || 'arn:aws:dynamodb:eu-west-2:016164185850:table/contractor-pay-development';
+        } catch (error) {
+            document.getElementById('db-arn').textContent = 'Failed to load database ARN';
+        }
+    }
 
-        overlay.style.display = 'flex';
-        container.innerHTML = '<div class="spinner"></div>';
+    async function loadUmbrellaData() {
+        const tbody = document.getElementById('umbrellas-tbody');
+        tbody.innerHTML = '<tr><td colspan="21" style="text-align: center; padding: 2rem;"><div class="spinner"></div></td></tr>';
 
         try {
             const response = await fetch('/api/umbrella-stats');
             const data = await response.json();
 
             if (data.error) {
-                container.innerHTML = '<div class="alert alert-danger">Failed to load umbrella data: ' + (data.message || data.error) + '</div>';
-                overlay.style.display = 'none';
+                tbody.innerHTML = `<tr><td colspan="21" class="alert alert-danger">Failed to load umbrella data: ${data.message || data.error}</td></tr>`;
                 return;
             }
 
@@ -256,111 +305,85 @@
             const months = data.months || [];
             const summary = data.summary || {};
 
-            // Update summary subtitle
-            if (summary.total_files !== undefined) {
-                document.getElementById('summary-files').textContent = summary.total_files;
-                document.getElementById('summary-umbrellas').textContent = summary.total_umbrellas;
-                document.getElementById('summary-months').textContent = summary.total_months;
-                document.getElementById('summary-contractors').textContent = summary.total_contractors;
-                document.getElementById('summary-subtitle').style.display = 'block';
+            // Update summary cards
+            if (summary.total_umbrellas !== undefined) {
+                document.getElementById('total-umbrellas').textContent = summary.total_umbrellas;
+                document.getElementById('total-files').textContent = summary.total_files || 0;
+                document.getElementById('total-contractors').textContent = summary.total_contractors || 0;
+                document.getElementById('total-months').textContent = summary.total_months || 0;
             }
 
             if (umbrellas.length === 0) {
-                container.innerHTML = `
-                    <div class="empty-state">
-                        <div class="empty-icon">🏢</div>
-                        <h3>No umbrella company data found</h3>
-                        <p>Upload pay files to see umbrella company statistics</p>
-                    </div>
+                tbody.innerHTML = `
+                    <tr>
+                        <td colspan="21" style="text-align: center; padding: 3rem;">
+                            <div style="font-size: 3rem; margin-bottom: 1rem; opacity: 0.5;">🏢</div>
+                            <h3 style="color: var(--text-primary); margin-bottom: 0.5rem;">No umbrella company data found</h3>
+                            <p style="color: var(--text-secondary);">Upload pay files to see umbrella company statistics</p>
+                        </td>
+                    </tr>
                 `;
-                overlay.style.display = 'none';
                 return;
             }
 
-            displayUmbrellaTiles(umbrellas, months);
-            overlay.style.display = 'none';
+            displayUmbrellaTable(umbrellas, months);
 
         } catch (error) {
-            container.innerHTML = '<div class="alert alert-danger">Failed to load umbrella data: ' + error.message + '</div>';
-            overlay.style.display = 'none';
+            tbody.innerHTML = `<tr><td colspan="21" class="alert alert-danger">Failed to load umbrella data: ${error.message}</td></tr>`;
         }
     }
 
-    function displayUmbrellaTiles(umbrellas, months) {
-        const container = document.getElementById('umbrellas-container');
-
-        // Sort months by calendar order
+    function displayUmbrellaTable(umbrellas, months) {
+        const tbody = document.getElementById('umbrellas-tbody');
         const sortedMonths = sortMonths(months);
 
-        // Calculate billing summary
-        let totalBillingPeriods = 0;
-        umbrellas.forEach(umbrella => {
-            const monthlyTotals = umbrella.monthly_totals || {};
-            Object.values(monthlyTotals).forEach(amount => {
-                if (amount > 0) {
-                    totalBillingPeriods++;
-                }
-            });
-        });
-
-        // Update billing summary
-        const billingText = `Billed <strong style="color: var(--accent);">${umbrellas.length}</strong> umbrella ${umbrellas.length === 1 ? 'company' : 'companies'} for <strong style="color: var(--accent);">${sortedMonths.length}</strong> ${sortedMonths.length === 1 ? 'month' : 'months'} (<strong style="color: var(--accent);">${totalBillingPeriods}</strong> billing ${totalBillingPeriods === 1 ? 'period' : 'periods'})`;
-        document.getElementById('billing-text').innerHTML = billingText;
-        document.getElementById('billing-summary').style.display = 'block';
-
-        let html = '<div class="umbrella-grid">';
+        let html = '';
 
         umbrellas.forEach(umbrella => {
-            const monthlyTotals = umbrella.monthly_totals || {};
+            const contactsJson = JSON.stringify(umbrella.contacts || []);
+            const statusBadge = umbrella.is_active
+                ? '<span class="badge badge-success">Active</span>'
+                : '<span class="badge badge-info">Inactive</span>';
 
             html += `
-                <div class="umbrella-tile">
-                    <div class="umbrella-header">
-                        <div>
-                            <div class="umbrella-name">${umbrella.name}</div>
-                            <div class="umbrella-code">${umbrella.code}</div>
-                        </div>
-                    </div>
-
-                    <div class="resource-count">
-                        <span>Resources:</span>
-                        <span class="count">${umbrella.contractor_count}</span>
-                        <span>${umbrella.contractor_count === 1 ? 'contractor' : 'contractors'}</span>
-                    </div>
-
-                    <div class="monthly-timeline">
-            `;
-
-            // Display each month
-            sortedMonths.forEach(month => {
-                const amount = monthlyTotals[month] || 0;
-                const hasData = amount > 0;
-                const formattedAmount = hasData ? formatCurrency(amount) : '-';
-                const amountClass = hasData ? 'has-data' : 'no-data';
-
-                html += `
-                    <div class="month-block">
-                        <div class="month-label">${month}</div>
-                        <div class="month-amount ${amountClass}">${formattedAmount}</div>
-                    </div>
-                `;
-            });
-
-            html += `
-                    </div>
-
-                    <div class="summary-section">
-                        <div class="total-paid">
-                            Total Paid:<span class="amount">${formatCurrency(umbrella.total_paid)}</span>
-                        </div>
-                    </div>
-                </div>
+                <tr>
+                    <td>${umbrella.pk || 'N/A'}</td>
+                    <td>${umbrella.sk || 'N/A'}</td>
+                    <td>${umbrella.umbrella_id || 'N/A'}</td>
+                    <td style="font-family: monospace; font-weight: 600;"><strong>${umbrella.umbrella_code || 'N/A'}</strong></td>
+                    <td>${umbrella.file_name_variation || 'N/A'}</td>
+                    <td>${umbrella.legal_name || 'N/A'}</td>
+                    <td>${umbrella.company_reg_no || 'N/A'}</td>
+                    <td>${umbrella.vat_no || 'N/A'}</td>
+                    <td>${umbrella.registered_address || 'N/A'}</td>
+                    <td>${umbrella.website || 'N/A'}</td>
+                    <td>${umbrella.primary_contact_email || 'N/A'}</td>
+                    <td style="font-size: 0.75rem; max-width: 200px; overflow: hidden; text-overflow: ellipsis;">${contactsJson}</td>
+                    <td>${umbrella.contact_count || 0}</td>
+                    <td>${statusBadge}</td>
+                    <td>${umbrella.entity_type || 'N/A'}</td>
+                    <td>${umbrella.metadata || 'N/A'}</td>
+                    <td>${umbrella.created_at || 'N/A'}</td>
+                    <td>${umbrella.updated_at || 'N/A'}</td>
+                    <td>${umbrella.gsi1_pk || 'N/A'}</td>
+                    <td>${umbrella.gsi1_sk || 'N/A'}</td>
+                    <td>${umbrella.gsi2_pk || 'N/A'}</td>
+                    <td>${umbrella.gsi2_sk || 'N/A'}</td>
+                </tr>
             `;
         });
 
-        html += '</div>';
+        tbody.innerHTML = html;
+    }
 
-        container.innerHTML = html;
+    function editUmbrella(code) {
+        alert(`Edit functionality for ${code} coming soon!`);
+        // TODO: Implement edit modal or redirect to edit page
+    }
+
+    function viewUmbrellaDetails(code) {
+        alert(`Detailed view for ${code} coming soon!`);
+        // TODO: Implement details modal or redirect to details page
     }
 
     function sortMonths(months) {

@@ -62,38 +62,6 @@
         color: var(--accent);
     }
 
-    /* Margin Color Coding */
-    .margin-high {
-        color: var(--success);
-        font-weight: 600;
-    }
-
-    .margin-medium {
-        color: var(--warning);
-        font-weight: 600;
-    }
-
-    .margin-low {
-        color: var(--danger);
-        font-weight: 600;
-    }
-
-    /* Warning Row Highlight */
-    .warning-row {
-        background: rgba(239, 68, 68, 0.05) !important;
-        border-left: 3px solid var(--danger);
-    }
-
-    .warning-row:hover {
-        background: rgba(239, 68, 68, 0.1) !important;
-    }
-
-    .warning-icon {
-        color: var(--danger);
-        font-weight: bold;
-        margin-right: 0.5rem;
-    }
-
     /* Empty State */
     .empty-state {
         text-align: center;
@@ -119,11 +87,67 @@
     .empty-state p {
         color: var(--text-secondary);
     }
+
+    /* Lock Status Banner */
+    .lock-banner {
+        background: linear-gradient(135deg, #dc2626 0%, #b91c1c 100%);
+        color: white;
+        padding: 1rem 1.5rem;
+        border-radius: 0.5rem;
+        margin-bottom: 1.5rem;
+        border: 2px solid #991b1b;
+        box-shadow: 0 4px 12px rgba(220, 38, 38, 0.3);
+    }
+
+    .lock-banner-header {
+        display: flex;
+        align-items: center;
+        gap: 0.75rem;
+        font-size: 1.125rem;
+        font-weight: 700;
+        margin-bottom: 0.5rem;
+    }
+
+    .lock-icon {
+        font-size: 1.5rem;
+    }
+
+    .lock-banner-content {
+        font-size: 0.875rem;
+        opacity: 0.95;
+        line-height: 1.6;
+    }
+
+    .lock-banner ul {
+        margin: 0.5rem 0 0 1.5rem;
+        padding: 0;
+    }
+
+    .lock-banner li {
+        margin: 0.25rem 0;
+    }
 </style>
 {% endblock %}
 
 {% block content %}
 <h2>Contractors Management</h2>
+
+<!-- Lock Status Banner -->
+<div class="lock-banner" id="lock-banner">
+    <div class="lock-banner-header">
+        <span class="lock-icon">🔒</span>
+        <span>CONTRACTOR DATA IS PROTECTED</span>
+    </div>
+    <div class="lock-banner-content">
+        <strong>This data is READ-ONLY and cannot be modified without authorization.</strong>
+        <ul>
+            <li>All contractor records are password-protected</li>
+            <li>Modifications require administrator password</li>
+            <li>Data protection prevents accidental deletion or changes</li>
+        </ul>
+        <em>Contact system administrator for data modifications.</em>
+    </div>
+</div>
 
 <!-- Summary Cards -->
 <div class="summary-grid" id="summary-cards">
@@ -136,11 +160,6 @@
         <div class="card-header">Active</div>
         <div class="card-value" style="color: var(--success);" id="active-contractors">0</div>
         <div class="card-subtitle">Currently active</div>
-    </div>
-    <div class="card">
-        <div class="card-header">Average Margin</div>
-        <div class="card-value" id="avg-margin">0%</div>
-        <div class="card-subtitle">Across all contractors</div>
     </div>
     <div class="card">
         <div class="card-header">Total Sell Rate</div>
@@ -197,32 +216,11 @@
         const total = allContractors.length;
         const active = allContractors.filter(c => c.is_active).length;
 
-        // Calculate average margin
-        let totalMargin = 0;
-        let validMargins = 0;
-        allContractors.forEach(c => {
-            const marginPercent = parseFloat(c.margin_percent);
-            if (marginPercent !== undefined && !isNaN(marginPercent)) {
-                totalMargin += marginPercent;
-                validMargins++;
-            } else {
-                const sellRate = parseFloat(c.sell_rate) || 0;
-                const buyRate = parseFloat(c.buy_rate) || 0;
-                if (sellRate > 0) {
-                    const margin = ((sellRate - buyRate) / sellRate * 100);
-                    totalMargin += margin;
-                    validMargins++;
-                }
-            }
-        });
-        const avgMargin = validMargins > 0 ? (totalMargin / validMargins).toFixed(1) : 0;
-
         // Calculate total sell rate
         const totalSellRate = allContractors.reduce((sum, c) => sum + (parseFloat(c.sell_rate) || 0), 0);
 
         document.getElementById('total-contractors').textContent = total;
         document.getElementById('active-contractors').textContent = active;
-        document.getElementById('avg-margin').textContent = avgMargin + '%';
         document.getElementById('total-sell-rate').textContent = '£' + totalSellRate.toLocaleString('en-GB', {minimumFractionDigits: 2, maximumFractionDigits: 2});
     }
 
@@ -249,11 +247,7 @@
                             <th class="sortable" onclick="sortTable('full_name')">Name</th>
                             <th class="sortable" onclick="sortTable('job_title')">Job Title</th>
                             <th class="sortable" onclick="sortTable('sell_rate')">Sell Rate</th>
-                            <th class="sortable" onclick="sortTable('buy_rate')">Buy Rate</th>
-                            <th class="sortable" onclick="sortTable('margin')">Margin</th>
-                            <th class="sortable" onclick="sortTable('margin_percent')">Margin %</th>
                             <th class="sortable" onclick="sortTable('is_active')">Status</th>
-                            <th style="width: 100px;">Actions</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -261,46 +255,23 @@
 
         contractors.forEach(contractor => {
             const sellRate = parseFloat(contractor.sell_rate) || 0;
-            const buyRate = parseFloat(contractor.buy_rate) || 0;
-            const margin = parseFloat(contractor.margin) || (sellRate - buyRate);
-            const marginPercent = parseFloat(contractor.margin_percent) || (sellRate > 0 ? ((sellRate - buyRate) / sellRate * 100) : 0);
 
             // Format currency with thousand separators
             const formatCurrency = (value) => {
                 return '£' + value.toLocaleString('en-GB', {minimumFractionDigits: 2, maximumFractionDigits: 2});
             };
 
-            // Check if margin is problematic (zero or negative)
-            const hasMarginIssue = margin <= 0 || marginPercent <= 0;
-            const rowClass = hasMarginIssue ? 'warning-row' : '';
-            const warningIcon = hasMarginIssue ? '<span class="warning-icon" title="Zero or negative margin!">⚠️</span>' : '';
-
-            // Color code margin percentage
-            let marginClass = 'margin-low';
-            if (marginPercent >= 20) {
-                marginClass = 'margin-high';
-            } else if (marginPercent >= 10) {
-                marginClass = 'margin-medium';
-            }
-
             const statusBadge = contractor.is_active
                 ? '<span class="badge badge-success">Active</span>'
                 : '<span class="badge badge-info">Inactive</span>';
 
             html += `
-                <tr class="${rowClass}">
-                    <td style="text-align: center;">${warningIcon}</td>
+                <tr>
+                    <td style="text-align: center;"></td>
                     <td><strong>${contractor.full_name}</strong></td>
                     <td>${contractor.job_title || 'N/A'}</td>
                     <td>${formatCurrency(sellRate)}</td>
-                    <td>${formatCurrency(buyRate)}</td>
-                    <td>${formatCurrency(margin)}</td>
-                    <td><span class="${marginClass}">${marginPercent.toFixed(1)}%</span></td>
                     <td>${statusBadge}</td>
-                    <td style="text-align: center;">
-                        <a href="/contractors/edit/${encodeURIComponent(contractor.email)}" title="Edit contractor" style="text-decoration: none; font-size: 1.1rem; margin-right: 0.5rem;">✏️</a>
-                        <a href="/contractors/edit/${encodeURIComponent(contractor.email)}" class="btn btn-secondary" style="padding: 0.4rem 0.8rem; font-size: 0.75rem;">Edit</a>
-                    </td>
                 </tr>
             `;
         });
@@ -330,10 +301,7 @@
         sorted.sort((a, b) => {
             let aVal, bVal;
 
-            if (column === 'margin' || column === 'margin_percent') {
-                aVal = parseFloat(a[column]) || 0;
-                bVal = parseFloat(b[column]) || 0;
-            } else if (column === 'sell_rate' || column === 'buy_rate') {
+            if (column === 'sell_rate') {
                 aVal = parseFloat(a[column]) || 0;
                 bVal = parseFloat(b[column]) || 0;
             } else if (column === 'is_active') {
@@ -371,10 +339,7 @@
                 'full_name': 0,
                 'job_title': 1,
                 'sell_rate': 2,
-                'buy_rate': 3,
-                'margin': 4,
-                'margin_percent': 5,
-                'is_active': 6
+                'is_active': 3
             };
 
             const thIndex = columnMap[currentSort.column];

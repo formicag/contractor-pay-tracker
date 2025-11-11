@@ -213,12 +213,12 @@ class ValidationEngine:
 
         if contractor_id:
             print("[VALIDATE_RECORD] contractor_id is set, calling check_rate_change()")
-            day_rate = record.get('day_rate')
-            print(f"[VALIDATE_RECORD] day_rate: {day_rate}")
+            sell_rate = record.get('sell_rate')
+            print(f"[VALIDATE_RECORD] sell_rate: {sell_rate}")
 
             rate_change_result = self.check_rate_change(
                 contractor_id,
-                day_rate,
+                sell_rate,
                 period_data
             )
             print(f"[VALIDATE_RECORD] check_rate_change returned: {rate_change_result}")
@@ -539,7 +539,7 @@ class ValidationEngine:
         CRITICAL error if incorrect (with tolerance)
 
         Args:
-            record: Pay record dict with overtime day_rate
+            record: Pay record dict with overtime sell_rate
             contractor_id: Contractor UUID
             period_data: Pay period information
 
@@ -549,11 +549,11 @@ class ValidationEngine:
         print("[VALIDATE_OVERTIME_RATE] Starting validate_overtime_rate()")
         print(f"[VALIDATE_OVERTIME_RATE] contractor_id={contractor_id}, period_id={period_data.get('PeriodNumber')}")
 
-        print("[VALIDATE_OVERTIME_RATE] About to execute: Extract overtime day_rate from record")
-        day_rate_str = record['day_rate']
-        print(f"[VALIDATE_OVERTIME_RATE] Retrieved day_rate string: {day_rate_str}")
+        print("[VALIDATE_OVERTIME_RATE] About to execute: Extract overtime sell_rate from record")
+        sell_rate_str = record['sell_rate']
+        print(f"[VALIDATE_OVERTIME_RATE] Retrieved sell_rate string: {sell_rate_str}")
 
-        overtime_rate = Decimal(str(day_rate_str))
+        overtime_rate = Decimal(str(sell_rate_str))
         print(f"[VALIDATE_OVERTIME_RATE] Converted overtime_rate to Decimal: {overtime_rate}")
 
         print("[VALIDATE_OVERTIME_RATE] About to execute: Get overtime multiplier from system params")
@@ -594,8 +594,8 @@ class ValidationEngine:
             print(f"[VALIDATE_OVERTIME_RATE] Retrieved {len(recent_records)} recent records")
 
             if recent_records:
-                print("[VALIDATE_OVERTIME_RATE] About to execute: Extract DayRate from most recent STANDARD record")
-                normal_rate = recent_records[0].get('DayRate')
+                print("[VALIDATE_OVERTIME_RATE] About to execute: Extract SellRate from most recent STANDARD record")
+                normal_rate = recent_records[0].get('SellRate')
                 print(f"[VALIDATE_OVERTIME_RATE] Extracted normal_rate from most recent record: {normal_rate}")
             else:
                 print("[VALIDATE_OVERTIME_RATE] No recent pay records found for contractor")

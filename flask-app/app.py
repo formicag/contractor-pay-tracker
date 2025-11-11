@@ -12,6 +12,7 @@ import json
 import logging
 import webbrowser
 import threading
+import time
 
 from flask import Flask, render_template, request, jsonify, redirect, url_for, send_file
 from dotenv import load_dotenv
@@ -41,7 +42,10 @@ AWS_REGION = os.environ.get('AWS_REGION', 'eu-west-2')
 AWS_PROFILE = os.environ.get('AWS_PROFILE', 'AdministratorAccess-016164185850')
 S3_BUCKET = os.environ.get('S3_BUCKET_NAME', '')
 DYNAMODB_TABLE = os.environ.get('DYNAMODB_TABLE_NAME', '')
-PAYFILES_TABLE = os.environ.get('PAYFILES_TABLE_NAME', '')
+PAYFILES_TABLE = os.environ.get('PAYFILES_TABLE_NAME', 'contractor-pay-files-development')
+CONTRACTORS_TABLE = os.environ.get('CONTRACTORS_TABLE_NAME', 'contractor-pay-contractors-development')
+PERMSTAFF_TABLE = os.environ.get('PERMSTAFF_TABLE_NAME', 'contractor-pay-permstaff-development')
+UMBRELLAS_TABLE = os.environ.get('UMBRELLAS_TABLE_NAME', 'contractor-pay-umbrellas-development')
 FILE_PROCESSOR_ARN = os.environ.get('FILE_PROCESSOR_ARN', '')
 
 # Initialize AWS clients
@@ -51,40 +55,28 @@ dynamodb = session.resource('dynamodb')
 lambda_client = session.client('lambda')
 table = dynamodb.Table(DYNAMODB_TABLE) if DYNAMODB_TABLE else None
 payfiles_table = dynamodb.Table(PAYFILES_TABLE) if PAYFILES_TABLE else None
+contractors_table = dynamodb.Table(CONTRACTORS_TABLE)
+permstaff_table = dynamodb.Table(PERMSTAFF_TABLE)
+umbrellas_table = dynamodb.Table(UMBRELLAS_TABLE)
+
+print("=" * 80)
+print("🔧 AWS TABLES INITIALIZED")
+print("=" * 80)
+print(f"✅ Main table: {DYNAMODB_TABLE}")
+print(f"✅ Pay files table: {PAYFILES_TABLE}")
+print(f"✅ Contractors table: {CONTRACTORS_TABLE}")
+print(f"✅ Perm staff table: {PERMSTAFF_TABLE}")
+print(f"⛔ Umbrellas table (READ-ONLY - DO NOT MODIFY): {UMBRELLAS_TABLE}")
+print("=" * 80)
+print("⚠️  WARNING: contractor-pay-umbrellas-development is READ-ONLY")
+print("⚠️  NO write operations allowed on umbrella companies table")
+print("⚠️  See: DO-NOT-TOUCH-UMBRELLAS.md")
+print("=" * 80)
 
 # Register file management endpoints
 from file_management_endpoints import register_file_endpoints
 if payfiles_table:
     register_file_endpoints(app, payfiles_table, s3_client)
-
-
-def calculate_margin(sell_rate, buy_rate):
-    """
-    Calculate margin and margin percentage from sell and buy rates
-
-    Args:
-        sell_rate: Sell rate (what we charge customers)
-        buy_rate: Buy rate (what we pay contractors)
-
-    Returns:
-        tuple: (margin, margin_percent) where:
-            - margin = sell_rate - buy_rate
-            - margin_percent = ((sell_rate - buy_rate) / sell_rate) * 100
-
-    Raises:
-        ValueError: If sell_rate <= buy_rate (would result in zero or negative margin)
-    """
-    sell_rate = Decimal(str(sell_rate))
-    buy_rate = Decimal(str(buy_rate))
-
-    # Validate that margin will be positive
-    if sell_rate <= buy_rate:
-        raise ValueError(f"Sell Rate (£{sell_rate}) must be greater than Buy Rate (£{buy_rate}). Margin cannot be zero or negative.")
-
-    margin = sell_rate - buy_rate
-    margin_percent = (margin / sell_rate) * Decimal('100')
-
-    return margin, margin_percent
 
 
 def find_available_port(start_port=5555, max_attempts=100):
@@ -151,57 +143,18 @@ def perm_staff():
     return render_template('perm_staff.html')
 
 
-@app.route('/contractors/edit/<email>')
-def edit_contractor(email):
-    """Edit contractor page"""
-    try:
-        # Query DynamoDB for contractor by email
-        response = table.get_item(
-            Key={
-                'PK': f'CONTRACTOR#{email}',
-                'SK': 'METADATA'
-            }
-        )
-
-        if 'Item' not in response:
-            return render_template('404.html'), 404
-
-        contractor = response['Item']
-
-        # Use Email or ResourceContactEmail (backward compatibility)
-        contractor_email = contractor.get('Email') or contractor.get('ResourceContactEmail', email)
-
-        # Format contractor data for template
-        contractor_data = {
-            'email': contractor_email,
-            'contractor_id': contractor.get('ContractorID'),
-            'title': contractor.get('Title', 'Mr'),
-            'first_name': contractor.get('FirstName', ''),
-            'last_name': contractor.get('LastName', ''),
-            'job_title': contractor.get('JobTitle'),
-            'resource_email': contractor.get('ResourceEmail') or contractor.get('ResourceContactEmail'),
-            'nasstar_email': contractor.get('NasstarEmail'),
-            'line_manager_email': contractor.get('LineManagerEmail'),
-            'sell_rate': contractor.get('SellRate', 0),
-            'buy_rate': contractor.get('BuyRate', 0),
-            'snow_unit_rate': contractor.get('SNOWUnitRate'),
-            'engagement_type': contractor.get('EngagementType'),
-            'customer': contractor.get('Customer'),
-            'snow_product': contractor.get('SNOWProduct') or contractor.get('SNOWProductOffering'),
-            'is_active': contractor.get('IsActive', contractor.get('Status', 'ACTIVE') == 'ACTIVE')
-        }
-
-        return render_template('edit_contractor.html', contractor=contractor_data)
-
-    except Exception as e:
-        app.logger.error(f"Error loading contractor for edit: {str(e)}")
-        return render_template('500.html'), 500
-
-
+################################################################################
+# ⛔ LOCKED CODE - DO NOT MODIFY ⛔
+# Umbrella Dashboard Route - READ-ONLY FOREVER
+# See: DO-NOT-TOUCH-UMBRELLA-DASHBOARD.md
+################################################################################
 @app.route('/umbrella-dashboard')
 def umbrella_dashboard():
     """Umbrella company reporting dashboard"""
     return render_template('umbrella_dashboard.html')
+################################################################################
+# ⛔ END LOCKED CODE ⛔
+################################################################################
 
 
 @app.route('/debug')
@@ -790,49 +743,58 @@ def api_file_validation(file_id):
         return jsonify({'error': 'Failed to fetch validation data', 'message': str(e)}), 500
 
 
+@app.route('/api/contractors/lock-status', methods=['GET'])
+def api_contractors_lock_status():
+    """
+    API endpoint to get contractor data lock status
+
+    Returns: JSON with lock status and protection information
+    """
+    from contractor_lock import get_contractor_lock_status
+    return jsonify(get_contractor_lock_status())
+
+
 @app.route('/api/contractors', methods=['GET'])
 def api_contractors():
     """
-    API endpoint to list contractors
+    API endpoint to list contractors (READ-ONLY)
+    🔒 This data is protected - modifications require password
 
     Returns: JSON with contractors list
     """
     try:
-        # Query DynamoDB for Umbrella Company contractors from report-guardian-api-dev-resources table
-        response = table.scan(
-            FilterExpression='engagement_type = :umbrella',
+        # Query DynamoDB for Contractor entities from contractor-pay-development table
+        response = payfiles_table.scan(
+            FilterExpression='EntityType = :et',
             ExpressionAttributeValues={
-                ':umbrella': 'Umbrella Company (PAYE)'
+                ':et': 'Contractor'
             }
         )
 
         contractors_list = []
         for item in response.get('Items', []):
-            # Convert Decimal to float for day_rate_gbp
-            day_rate = float(item.get('day_rate_gbp', 0))
+            # Extract data using PascalCase schema
+            contractor_id = item.get('ContractorID', '')
+            email = item.get('Email', item.get('ResourceEmail', ''))
+            first_name = item.get('FirstName', '')
+            last_name = item.get('LastName', '')
 
-            # For umbrella contractors, we don't have buy rate in this table
-            # Assume 80% margin as placeholder (can be updated later)
-            sell_rate = day_rate
-            buy_rate = day_rate * 0.8
-            margin = sell_rate - buy_rate
-            margin_percent = 20.0 if sell_rate > 0 else 0
+            # Convert Decimal to float for rates
+            sell_rate = float(item.get('SellRate', 0))
 
             contractor_data = {
-                'contractor_id': str(item.get('resource_id', '')),
-                'email': item.get('line_manager_email', ''),  # Using line manager email as contact
-                'first_name': item.get('first_name', ''),
-                'last_name': item.get('last_name', ''),
-                'full_name': f"{item.get('first_name', '')} {item.get('last_name', '')}".strip(),
-                'job_title': item.get('job_title', 'N/A'),
-                'umbrella_company': item.get('subcontractor_payroll_company', 'N/A'),
+                'contractor_id': contractor_id,
+                'email': email,
+                'first_name': first_name,
+                'last_name': last_name,
+                'full_name': f"{first_name} {last_name}".strip(),
+                'job_title': item.get('JobTitle', 'N/A'),
+                'umbrella_company': item.get('UmbrellaCompany', 'N/A'),
                 'sell_rate': sell_rate,
-                'buy_rate': buy_rate,
-                'margin': margin,
-                'margin_percent': margin_percent,
-                'is_active': item.get('is_active', True),
-                'created_at': item.get('assignment_start_date', ''),
-                'assignment_end_date': item.get('assignment_end_date', '')
+                'is_active': item.get('IsActive', True),
+                'created_at': item.get('CreatedAt', ''),
+                'engagement_type': item.get('EngagementType', 'N/A'),
+                'customer': item.get('Customer', 'N/A')
             }
             contractors_list.append(contractor_data)
 
@@ -843,141 +805,303 @@ def api_contractors():
 
     except Exception as e:
         app.logger.error(f"Error fetching contractors: {str(e)}")
+        import traceback
+        app.logger.error(traceback.format_exc())
         return jsonify({'error': 'Failed to fetch contractors', 'message': str(e)}), 500
+
+
+@app.route('/api/perm-staff/lock-status', methods=['GET'])
+def api_perm_staff_lock_status():
+    """
+    API endpoint to get permanent staff data lock status
+
+    Returns: JSON with lock status and protection information
+    """
+    from perm_staff_lock import get_lock_status
+    return jsonify(get_lock_status())
 
 
 @app.route('/api/perm-staff', methods=['GET'])
 def api_perm_staff():
     """
-    API endpoint to list permanent staff
+    API endpoint to list permanent staff (READ-ONLY)
+    🔒 This data is protected - modifications require password
+
+    IMPORTANT: Permanent staff are stored as EntityType = 'PermanentStaff'
+    They are completely separate from contractors.
 
     Returns: JSON with permanent staff list
     """
     try:
-        # Query DynamoDB for PAYE (on payroll) staff from report-guardian-api-dev-resources table
-        response = table.scan(
-            FilterExpression='engagement_type = :paye',
+        app.logger.info("=" * 80)
+        app.logger.info("🔍 PERMANENT STAFF API - DETAILED VERBOSE LOGGING")
+        app.logger.info("=" * 80)
+
+        # STEP 1: Log table information
+        app.logger.info("STEP 1: Identifying table to scan")
+        app.logger.info(f"   Table name: {PERMSTAFF_TABLE}")
+        app.logger.info(f"   Table object: {permstaff_table}")
+        app.logger.info(f"   EntityType filter: PermanentStaff")
+
+        # STEP 2: Scan DynamoDB for PermanentStaff entities
+        app.logger.info("=" * 80)
+        app.logger.info("STEP 2: Scanning DynamoDB for permanent staff")
+        app.logger.info("=" * 80)
+
+        response = permstaff_table.scan(
+            FilterExpression='EntityType = :et',
             ExpressionAttributeValues={
-                ':paye': 'PAYE (on payroll)'
+                ':et': 'PermanentStaff'
             }
         )
 
+        app.logger.info(f"✅ Scan complete")
+        app.logger.info(f"   Items returned: {len(response.get('Items', []))}")
+        app.logger.info(f"   Scanned count: {response.get('ScannedCount', 0)}")
+
+        # STEP 3: Process each staff member
+        app.logger.info("=" * 80)
+        app.logger.info("STEP 3: Processing staff members into list")
+        app.logger.info("=" * 80)
+
         staff_list = []
-        for item in response.get('Items', []):
-            # Convert Decimal to float for day_rate_gbp
-            day_rate = float(item.get('day_rate_gbp', 0))
+        for idx, item in enumerate(response.get('Items', [])):
+            app.logger.info(f"Processing staff member {idx + 1}/{len(response.get('Items', []))}")
+            app.logger.info(f"   Raw item keys: {list(item.keys())}")
 
+            # STEP 3a: Extract identification fields
+            staff_id = item.get('StaffID', '')
+            employee_id = item.get('EmployeeID', '')
+
+            app.logger.info(f"   StaffID: {staff_id}")
+
+            # STEP 3b: Extract name fields
+            first_name = item.get('FirstName', '')
+            last_name = item.get('LastName', '')
+            full_name = f"{first_name} {last_name}".strip()
+
+            app.logger.info(f"   Name: {full_name}")
+
+            # STEP 3c: Extract role/job fields
+            job_title = item.get('JobTitle', 'N/A')
+            customer = item.get('Customer', 'N/A')
+            sow_service_name = item.get('SowServiceName', 'N/A')
+
+            app.logger.info(f"   JobTitle: {job_title}")
+            app.logger.info(f"   Customer: {customer}")
+            app.logger.info(f"   SowServiceName: {sow_service_name}")
+
+            # STEP 3d: Extract rate (convert Decimal to float)
+            # Use SellRate only
+            rate_decimal = item.get('SellRate', 0)
+            sell_rate = float(rate_decimal) if rate_decimal else 0.0
+
+            app.logger.info(f"   SellRate: £{sell_rate}")
+
+            # STEP 3e: Extract other fields
+            is_active = item.get('IsActive', True)
+            created_at = item.get('CreatedAt', '')
+
+            # STEP 3f: Build staff data object - ALL FIELDS
             staff_data = {
-                'staff_id': str(item.get('resource_id', '')),
-                'email': item.get('line_manager_email', ''),  # Using line manager email as contact
-                'first_name': item.get('first_name', ''),
-                'last_name': item.get('last_name', ''),
-                'full_name': f"{item.get('first_name', '')} {item.get('last_name', '')}".strip(),
-                'job_title': item.get('job_title', 'N/A'),
-                'customer': item.get('division', ''),  # Using division as customer
-                'engagement_type': item.get('engagement_type', 'PAYE'),
-                'sell_rate': day_rate,
-                'is_active': item.get('is_active', True),
-                'created_at': item.get('assignment_start_date', '')
+                'pk': item.get('PK', ''),
+                'sk': item.get('SK', ''),
+                'staff_id': staff_id,
+                'employee_id': employee_id,
+                'first_name': first_name,
+                'last_name': last_name,
+                'full_name': full_name,
+                'job_title': job_title,
+                'customer': customer,
+                'engagement_type': 'PAYE',
+                'sow_service_name': sow_service_name,
+                'sell_rate': sell_rate,
+                'currency': item.get('Currency', 'GBP'),
+                'is_active': is_active,
+                'entity_type': item.get('EntityType', ''),
+                'created_at': created_at,
+                'updated_at': item.get('UpdatedAt', ''),
+                'gsi1_pk': item.get('GSI1PK', ''),
+                'gsi1_sk': item.get('GSI1SK', ''),
+                'gsi2_pk': item.get('GSI2PK', ''),
+                'gsi2_sk': item.get('GSI2SK', '')
             }
-            staff_list.append(staff_data)
 
-        # Sort by last name
+            staff_list.append(staff_data)
+            app.logger.info(f"   ✅ Added {full_name} to staff list")
+
+        # STEP 4: Sort staff list
+        app.logger.info("=" * 80)
+        app.logger.info("STEP 4: Sorting staff list by last name")
+        app.logger.info("=" * 80)
+
         staff_list.sort(key=lambda x: x.get('last_name', ''))
 
-        return jsonify({'staff': staff_list})
+        app.logger.info(f"✅ Sorted {len(staff_list)} staff members")
+
+        # STEP 5: Build response
+        app.logger.info("=" * 80)
+        app.logger.info("STEP 5: Building JSON response")
+        app.logger.info("=" * 80)
+
+        response_data = {'staff': staff_list}
+
+        app.logger.info(f"   Staff count in response: {len(staff_list)}")
+        for staff in staff_list:
+            app.logger.info(f"      - {staff['full_name']} - {staff['job_title']} - {staff['customer']} - £{staff['sell_rate']}")
+
+        app.logger.info("=" * 80)
+        app.logger.info("✅ API RESPONSE READY - Returning to client")
+        app.logger.info(f"   Response contains {len(staff_list)} permanent staff members")
+        app.logger.info("=" * 80)
+
+        return jsonify(response_data)
 
     except Exception as e:
-        app.logger.error(f"Error fetching permanent staff: {str(e)}")
+        app.logger.error("=" * 80)
+        app.logger.error("❌ ERROR IN PERMANENT STAFF API")
+        app.logger.error("=" * 80)
+        app.logger.error(f"Error message: {str(e)}")
+        app.logger.error(f"Error type: {type(e).__name__}")
+        import traceback
+        app.logger.error("Full traceback:")
+        app.logger.error(traceback.format_exc())
+        app.logger.error("=" * 80)
         return jsonify({'error': 'Failed to fetch permanent staff', 'message': str(e)}), 500
 
 
-@app.route('/api/perm-staff/<email>', methods=['POST'])
-def update_perm_staff(email):
+@app.route('/api/perm-staff-lambda', methods=['GET'])
+def api_perm_staff_lambda():
     """
-    API endpoint to update permanent staff member
-    🔒 LOCKED - Requires password "luca" to modify
+    API endpoint to fetch permanent staff via Lambda function
+    🚀 Invokes dedicated Lambda that reads directly from DynamoDB
 
-    Returns: JSON with success status
+    This ensures we're getting data from the CORRECT table with CORRECT fields
     """
-    # Check for unlock password
-    from perm_staff_lock import verify_unlock_password
+    import sys
+    import os
 
-    data = request.get_json() if request.is_json else {}
-    unlock_password = data.get('unlock_password') or request.headers.get('X-Unlock-Password')
+    # Track API call start
+    from debug_tracker import track_api_call
+    start_time = time.time()
 
-    if not verify_unlock_password(unlock_password):
-        return jsonify({
-            'error': 'Unauthorized',
-            'message': '🔒 Permanent staff data is LOCKED. Password required to modify.',
-            'locked': True
-        }), 403
     try:
-        data = request.get_json()
+        app.logger.info("=" * 80)
+        app.logger.info("🚀 INVOKING PERM STAFF READER LAMBDA")
+        app.logger.info("=" * 80)
 
-        # Build update expression
-        update_expr = []
-        expr_values = {}
-        expr_names = {}
+        # Import and run Lambda locally
+        sys.path.insert(0, '/Users/gianlucaformica/Projects/contractor-pay-tracker/backend/functions/perm_staff_reader')
+        import app as lambda_app
 
-        # Map frontend fields to DynamoDB fields
-        field_mapping = {
-            'first_name': 'FirstName',
-            'last_name': 'LastName',
-            'job_title': 'JobTitle',
-            'customer': 'Customer',
-            'sell_rate': 'SellRate',
-            'is_active': 'IsActive'
-        }
+        # Invoke Lambda handler
+        app.logger.info("Calling Lambda handler...")
+        lambda_response = lambda_app.lambda_handler({}, {})
 
-        for frontend_field, dynamo_field in field_mapping.items():
-            if frontend_field in data:
-                value = data[frontend_field]
+        app.logger.info(f"✅ Lambda returned status: {lambda_response['statusCode']}")
 
-                # Convert sell_rate to Decimal
-                if frontend_field == 'sell_rate':
-                    value = Decimal(str(value))
+        # Parse response
+        response_body = json.loads(lambda_response['body'])
 
-                update_expr.append(f'#{dynamo_field} = :{dynamo_field}')
-                expr_names[f'#{dynamo_field}'] = dynamo_field
-                expr_values[f':{dynamo_field}'] = value
+        # Track successful API call
+        response_time = (time.time() - start_time) * 1000
+        track_api_call('/api/perm-staff-lambda', 'GET', 200, response_time, None, {'count': response_body.get('count')})
 
-        # Always update UpdatedAt timestamp
-        update_expr.append('#UpdatedAt = :UpdatedAt')
-        expr_names['#UpdatedAt'] = 'UpdatedAt'
-        expr_values[':UpdatedAt'] = datetime.now().isoformat() + 'Z'
+        app.logger.info(f"✅ Returning {response_body.get('count')} staff members from Lambda")
+        app.logger.info("=" * 80)
 
-        # Update full name if first/last name changed
-        if 'first_name' in data or 'last_name' in data:
-            first_name = data.get('first_name', '')
-            last_name = data.get('last_name', '')
-            update_expr.append('#NormalizedName = :NormalizedName')
-            expr_names['#NormalizedName'] = 'NormalizedName'
-            expr_values[':NormalizedName'] = f"{first_name} {last_name}".lower()
-
-        # Update status based on is_active
-        if 'is_active' in data:
-            status = 'Active' if data['is_active'] else 'Inactive'
-            update_expr.append('#Status = :Status')
-            expr_names['#Status'] = 'Status'
-            expr_values[':Status'] = status
-
-        # Perform update
-        table.update_item(
-            Key={
-                'PK': f'CONTRACTOR#{email}',
-                'SK': 'METADATA'
-            },
-            UpdateExpression='SET ' + ', '.join(update_expr),
-            ExpressionAttributeNames=expr_names,
-            ExpressionAttributeValues=expr_values
-        )
-
-        return jsonify({'success': True, 'message': 'Permanent staff member updated successfully'})
+        return jsonify(response_body)
 
     except Exception as e:
-        app.logger.error(f"Error updating permanent staff {email}: {str(e)}")
-        return jsonify({'success': False, 'error': 'Failed to update permanent staff', 'message': str(e)}), 500
+        app.logger.error("❌ ERROR INVOKING LAMBDA")
+        app.logger.error(f"Error: {str(e)}")
+        import traceback
+        app.logger.error(traceback.format_exc())
+
+        # Track failed API call
+        response_time = (time.time() - start_time) * 1000
+        track_api_call('/api/perm-staff-lambda', 'GET', 500, response_time, None, {'error': str(e)})
+
+        from debug_tracker import track_error
+        track_error('LambdaInvocationError', str(e), traceback.format_exc())
+
+        return jsonify({'success': False, 'error': 'Failed to invoke Lambda', 'message': str(e)}), 500
+
+
+@app.route('/api/debug/events', methods=['GET'])
+def api_debug_events():
+    """
+    API endpoint to get debug events
+    Returns recent debug events for the debug panel
+    """
+    from debug_tracker import debug_tracker
+
+    since = request.args.get('since', type=int)
+    limit = request.args.get('limit', 100, type=int)
+
+    events = debug_tracker.get_events(since=since, limit=limit)
+
+    return jsonify({
+        'events': events,
+        'count': len(events)
+    })
+
+
+@app.route('/api/debug/stream')
+def api_debug_stream():
+    """
+    Server-Sent Events endpoint for real-time debug event streaming
+    """
+    from flask import Response, stream_with_context
+    import queue
+    import time
+    from debug_tracker import debug_tracker
+
+    def event_stream():
+        """Generator for SSE stream"""
+        q = queue.Queue()
+        debug_tracker.subscribe(q)
+
+        try:
+            # Send initial connection message
+            yield f"data: {json.dumps({'type': 'connected', 'message': 'Debug stream connected'})}\n\n"
+
+            while True:
+                try:
+                    # Wait for new event (with timeout to send heartbeat)
+                    event = q.get(timeout=30)
+                    yield f"data: {json.dumps(event)}\n\n"
+                except queue.Empty:
+                    # Send heartbeat to keep connection alive
+                    yield f": heartbeat\n\n"
+
+        except GeneratorExit:
+            debug_tracker.unsubscribe(q)
+
+    return Response(
+        stream_with_context(event_stream()),
+        mimetype='text/event-stream',
+        headers={
+            'Cache-Control': 'no-cache',
+            'X-Accel-Buffering': 'no'
+        }
+    )
+
+
+@app.route('/api/debug/track', methods=['POST'])
+def api_debug_track():
+    """
+    API endpoint to track user actions from frontend
+    """
+    from debug_tracker import track_user_action
+
+    data = request.get_json()
+    action = data.get('action', 'unknown')
+    details = data.get('details', {})
+
+    track_user_action(action, details)
+
+    return jsonify({'success': True})
 
 
 # ============================================================================
@@ -1277,136 +1401,150 @@ def api_match_canonical_entity():
         }), 500
 
 
+################################################################################
+# ⛔ LOCKED CODE - DO NOT MODIFY ⛔
+# Umbrella Stats API - READ-ONLY FOREVER
+# This endpoint ONLY reads from contractor-pay-umbrellas-development table
+# NO PayRecords scanning - umbrella company data only
+# See: DO-NOT-TOUCH-UMBRELLA-DASHBOARD.md
+################################################################################
 @app.route('/api/umbrella-stats', methods=['GET'])
 def api_umbrella_stats():
     """
     API endpoint to get umbrella company statistics
 
-    Returns: JSON with umbrella companies, contractor counts, and monthly payments
+    Returns: JSON with umbrella companies (NO payment data)
     """
     try:
         from collections import defaultdict
         from datetime import datetime
 
-        # Get all umbrella companies
-        umbrellas_response = table.scan(
+        app.logger.info("=" * 80)
+        app.logger.info("🔍 UMBRELLA STATS API - DETAILED LOGGING")
+        app.logger.info("=" * 80)
+
+        # STEP 1: Scan umbrellas table
+        app.logger.info("STEP 1: Scanning umbrellas table")
+        app.logger.info(f"   Table name: {UMBRELLAS_TABLE}")
+        app.logger.info(f"   Table object: {umbrellas_table}")
+
+        umbrellas_response = umbrellas_table.scan(
             FilterExpression='EntityType = :et',
             ExpressionAttributeValues={':et': 'Umbrella'}
         )
 
+        app.logger.info(f"✅ Scan complete")
+        app.logger.info(f"   Items returned: {len(umbrellas_response.get('Items', []))}")
+        app.logger.info(f"   Scanned count: {umbrellas_response.get('ScannedCount', 0)}")
+
+        app.logger.info("=" * 80)
+        app.logger.info("STEP 2: Processing umbrella items into dictionary")
+        app.logger.info("=" * 80)
+
         umbrellas = {}
-        for item in umbrellas_response.get('Items', []):
-            umbrella_code = item.get('UmbrellaCode', item.get('ShortCode'))
+        for idx, item in enumerate(umbrellas_response.get('Items', [])):
+            app.logger.info(f"Processing item {idx + 1}/{len(umbrellas_response.get('Items', []))}")
+            app.logger.info(f"   Raw item keys: {list(item.keys())}")
+
+            umbrella_code = item.get('UmbrellaCode')
+            app.logger.info(f"   UmbrellaCode: {umbrella_code}")
+
             if umbrella_code:
                 umbrellas[umbrella_code] = {
-                    'code': umbrella_code,
-                    'name': item.get('CompanyName', umbrella_code),
-                    'umbrella_id': item.get('UmbrellaID')
+                    'pk': item.get('PK', ''),
+                    'sk': item.get('SK', ''),
+                    'umbrella_id': item.get('UmbrellaID', ''),
+                    'umbrella_code': item.get('UmbrellaCode', ''),
+                    'file_name_variation': item.get('FileNameVariation', ''),
+                    'legal_name': item.get('LegalName', ''),
+                    'company_reg_no': item.get('CompanyRegNo', ''),
+                    'vat_no': item.get('VATNo', ''),
+                    'registered_address': item.get('RegisteredAddress', ''),
+                    'website': item.get('Website', ''),
+                    'primary_contact_email': item.get('PrimaryContactEmail', ''),
+                    'contacts': item.get('Contacts', []),
+                    'contact_count': item.get('ContactCount', 0),
+                    'is_active': item.get('IsActive', True),
+                    'entity_type': item.get('EntityType', ''),
+                    'metadata': item.get('Metadata', ''),
+                    'created_at': item.get('CreatedAt', ''),
+                    'updated_at': item.get('UpdatedAt', ''),
+                    'gsi1_pk': item.get('GSI1PK', ''),
+                    'gsi1_sk': item.get('GSI1SK', ''),
+                    'gsi2_pk': item.get('GSI2PK', ''),
+                    'gsi2_sk': item.get('GSI2SK', '')
                 }
-
-        # Get all PayRecords
-        payrecords_response = table.scan(
-            FilterExpression='EntityType = :et',
-            ExpressionAttributeValues={':et': 'PayRecord'}
-        )
-
-        # Get all Periods for month mapping
-        periods_response = table.scan(
-            FilterExpression='EntityType = :et',
-            ExpressionAttributeValues={':et': 'Period'}
-        )
-
-        # Create period to month mapping
-        period_to_month = {}
-        for period in periods_response.get('Items', []):
-            period_id = period.get('PeriodNumber', period.get('PeriodID'))
-            if period_id and period.get('WorkStartDate'):
-                try:
-                    start_date = datetime.fromisoformat(period['WorkStartDate'])
-                    month_abbr = start_date.strftime('%b')  # Feb, Mar, Apr, etc.
-                    period_to_month[str(period_id)] = month_abbr
-                except:
-                    period_to_month[str(period_id)] = f'P{period_id}'
-
-        # Aggregate data by umbrella and month
-        umbrella_stats = defaultdict(lambda: {
-            'code': '',
-            'name': '',
-            'contractors': set(),
-            'monthly_totals': defaultdict(Decimal),
-            'total_paid': Decimal('0')
-        })
-
-        for record in payrecords_response.get('Items', []):
-            umbrella_code = record.get('UmbrellaCode')
-            if not umbrella_code:
-                continue
-
-            contractor_id = record.get('ContractorID')
-            period_id = str(record.get('PeriodID', ''))
-            # Use 'Amount' field (actual field name in DynamoDB PayRecords)
-            total_pay = Decimal(str(record.get('Amount', 0)))
-
-            # Get month from period
-            month = period_to_month.get(period_id, f'P{period_id}')
-
-            # Update stats
-            if umbrella_code in umbrellas:
-                umbrella_stats[umbrella_code]['code'] = umbrella_code
-                umbrella_stats[umbrella_code]['name'] = umbrellas[umbrella_code]['name']
+                app.logger.info(f"   ✅ Added {umbrella_code} to umbrellas dictionary")
+                app.logger.info(f"      Legal Name: {umbrellas[umbrella_code]['legal_name']}")
+                app.logger.info(f"      Contacts: {len(umbrellas[umbrella_code]['contacts'])}")
             else:
-                umbrella_stats[umbrella_code]['code'] = umbrella_code
-                umbrella_stats[umbrella_code]['name'] = umbrella_code
+                app.logger.warning(f"   ⚠️ Item {idx + 1} has no UmbrellaCode - SKIPPED")
 
-            if contractor_id:
-                umbrella_stats[umbrella_code]['contractors'].add(contractor_id)
+        app.logger.info("=" * 80)
+        app.logger.info(f"✅ STEP 2 COMPLETE: Built umbrellas dictionary")
+        app.logger.info(f"   Total umbrellas in dictionary: {len(umbrellas)}")
+        app.logger.info(f"   Umbrella codes: {list(umbrellas.keys())}")
+        app.logger.info("=" * 80)
 
-            umbrella_stats[umbrella_code]['monthly_totals'][month] += total_pay
-            umbrella_stats[umbrella_code]['total_paid'] += total_pay
+        # STEP 3: Build result array directly from umbrellas (NO PayRecords scanning)
+        app.logger.info("STEP 3: Building result array from umbrella data")
+        app.logger.info("   (NO PayRecords scan - umbrella page shows company info only)")
 
-        # Convert to list and format
         result = []
-        for umbrella_code, stats in umbrella_stats.items():
-            # Convert monthly totals to sorted list
-            monthly_data = {}
-            for month, amount in stats['monthly_totals'].items():
-                monthly_data[month] = float(amount)
+        for umbrella_code, data in umbrellas.items():
+            umbrella_item = {
+                'pk': data['pk'],
+                'sk': data['sk'],
+                'umbrella_id': data['umbrella_id'],
+                'umbrella_code': data['umbrella_code'],
+                'file_name_variation': data['file_name_variation'],
+                'legal_name': data['legal_name'],
+                'company_reg_no': data['company_reg_no'],
+                'vat_no': data['vat_no'],
+                'registered_address': data['registered_address'],
+                'website': data['website'],
+                'primary_contact_email': data['primary_contact_email'],
+                'contacts': data['contacts'],
+                'contact_count': data['contact_count'],
+                'is_active': data['is_active'],
+                'entity_type': data['entity_type'],
+                'metadata': data['metadata'],
+                'created_at': data['created_at'],
+                'updated_at': data['updated_at'],
+                'gsi1_pk': data['gsi1_pk'],
+                'gsi1_sk': data['gsi1_sk'],
+                'gsi2_pk': data['gsi2_pk'],
+                'gsi2_sk': data['gsi2_sk']
+            }
+            result.append(umbrella_item)
 
-            result.append({
-                'code': stats['code'],
-                'name': stats['name'],
-                'contractor_count': len(stats['contractors']),
-                'monthly_totals': monthly_data,
-                'total_paid': float(stats['total_paid'])
-            })
+            app.logger.info(f"   ✅ Added {umbrella_code}")
+            app.logger.info(f"      Legal: {data['legal_name']}")
+            app.logger.info(f"      Reg: {data['company_reg_no']}")
+            app.logger.info(f"      VAT: {data['vat_no']}")
+            app.logger.info(f"      Contacts: {data['contact_count']}")
 
         # Sort by umbrella code
-        result.sort(key=lambda x: x['code'])
+        result.sort(key=lambda x: x['umbrella_code'])
 
-        # Calculate summary stats
-        all_contractors = set()
-        for stats in umbrella_stats.values():
-            all_contractors.update(stats['contractors'])
+        app.logger.info("=" * 80)
+        app.logger.info(f"✅ STEP 3 COMPLETE: Built result with {len(result)} umbrellas")
+        app.logger.info("=" * 80)
 
-        # Count unique files (FileMetadata entities)
-        files_response = table.scan(
-            FilterExpression='EntityType = :et',
-            ExpressionAttributeValues={':et': 'FileMetadata'}
-        )
-        total_files = len(files_response.get('Items', []))
-
-        unique_months = sorted(set(period_to_month.values()))
-
-        return jsonify({
+        # Build response
+        response_data = {
             'umbrellas': result,
-            'months': unique_months,
             'summary': {
-                'total_files': total_files,
-                'total_umbrellas': len(result),
-                'total_contractors': len(all_contractors),
-                'total_months': len(unique_months)
+                'total_umbrellas': len(result)
             }
-        })
+        }
+
+        app.logger.info("=" * 80)
+        app.logger.info("✅ API RESPONSE READY - Returning to client")
+        app.logger.info(f"   Response contains {len(result)} umbrella companies")
+        app.logger.info("=" * 80)
+
+        return jsonify(response_data)
 
     except Exception as e:
         app.logger.error(f"Error fetching umbrella stats: {str(e)}")
@@ -1414,236 +1552,9 @@ def api_umbrella_stats():
         app.logger.error(traceback.format_exc())
         return jsonify({'error': 'Failed to fetch umbrella statistics', 'message': str(e)}), 500
 
-
-@app.route('/api/contractors/<email>', methods=['POST'])
-def api_update_contractor(email):
-    """
-    API endpoint to update contractor with full audit trail
-    🔒 LOCKED - Requires password "luca" to modify
-
-    Expects: JSON with contractor fields (must include unlock_password)
-    Returns: JSON with success status and snapshot info
-    """
-    # Check for unlock password
-    from perm_staff_lock import verify_unlock_password
-
-    data = request.get_json() if request.is_json else {}
-    unlock_password = data.get('unlock_password') or request.headers.get('X-Unlock-Password')
-
-    if not verify_unlock_password(unlock_password):
-        return jsonify({
-            'error': 'Unauthorized',
-            'message': '🔒 Contractor data is LOCKED. Password required to modify.',
-            'locked': True
-        }), 403
-
-    try:
-        # Get current contractor data for snapshot
-        current_response = table.get_item(
-            Key={
-                'PK': f'CONTRACTOR#{email}',
-                'SK': 'METADATA'
-            }
-        )
-
-        if 'Item' not in current_response:
-            return jsonify({'error': 'Contractor not found'}), 404
-
-        current_contractor = current_response['Item']
-
-        # Get update data from request
-        update_data = request.json
-        app.logger.info(f"Received update data: {update_data}")
-
-        # Validate margin if rates are being changed
-        sell_rate = update_data.get('sell_rate')
-        buy_rate = update_data.get('buy_rate')
-
-        if sell_rate is not None and buy_rate is not None:
-            try:
-                # Validate and calculate margin
-                margin, margin_percent = calculate_margin(sell_rate, buy_rate)
-                # Add margin fields to update_data
-                update_data['margin'] = float(margin)
-                update_data['margin_percent'] = float(margin_percent)
-            except ValueError as e:
-                return jsonify({'error': str(e)}), 400
-
-        # Track what changed
-        changes = {}
-        field_mapping = {
-            'title': 'Title',
-            'first_name': 'FirstName',
-            'last_name': 'LastName',
-            'job_title': 'JobTitle',
-            'resource_email': 'ResourceEmail',
-            'nasstar_email': 'NasstarEmail',
-            'line_manager_email': 'LineManagerEmail',
-            'sell_rate': 'SellRate',
-            'buy_rate': 'BuyRate',
-            'margin': 'Margin',
-            'margin_percent': 'MarginPercent',
-            'snow_unit_rate': 'SNOWUnitRate',
-            'engagement_type': 'EngagementType',
-            'customer': 'Customer',
-            'snow_product': 'SNOWProduct',
-            'is_active': 'IsActive'
-        }
-
-        for api_field, db_field in field_mapping.items():
-            if api_field in update_data:
-                new_value = update_data[api_field]
-                old_value = current_contractor.get(db_field)
-
-                # Handle None values
-                if new_value != old_value:
-                    changes[db_field] = {
-                        'old': old_value,
-                        'new': new_value
-                    }
-
-        # Only proceed if there are changes
-        if not changes:
-            return jsonify({
-                'message': 'No changes detected',
-                'snapshot_created': False
-            })
-
-        # Create snapshot with timestamp
-        snapshot_timestamp = datetime.utcnow().isoformat() + 'Z'
-        snapshot_sk = f"SNAPSHOT#{snapshot_timestamp}"
-
-        # Prepare snapshot item (copy of current state before changes)
-        snapshot_item = dict(current_contractor)
-        snapshot_item['SK'] = snapshot_sk
-        snapshot_item['EntityType'] = 'ContractorSnapshot'
-        snapshot_item['SnapshotTimestamp'] = snapshot_timestamp
-
-        # Convert changes dict to be DynamoDB compatible
-        changes_serialized = {}
-        for field, change_info in changes.items():
-            old_val = change_info['old']
-            new_val = change_info['new']
-
-            # Convert values to DynamoDB-safe format
-            if isinstance(old_val, (Decimal, int, float)):
-                old_val = Decimal(str(old_val))
-            elif old_val is None:
-                old_val = 'null'
-
-            if isinstance(new_val, (Decimal, int, float)):
-                new_val = Decimal(str(new_val))
-            elif new_val is None:
-                new_val = 'null'
-
-            changes_serialized[field] = {
-                'old': old_val,
-                'new': new_val
-            }
-
-        snapshot_item['Changes'] = changes_serialized
-        snapshot_item['ChangeReason'] = 'Manual edit via Flask web interface'
-        snapshot_item['ChangedBy'] = 'flask-web-user'  # Could be enhanced with actual user tracking
-
-        # Update the main contractor record
-        update_expression_parts = []
-        expression_attribute_values = {}
-        expression_attribute_names = {}
-
-        for api_field, db_field in field_mapping.items():
-            if api_field in update_data:
-                value = update_data[api_field]
-
-                # Skip empty values - don't update them
-                if value == '' or value is None:
-                    continue
-
-                attr_name = f'#{db_field}'
-                attr_value = f':{api_field}'
-                update_expression_parts.append(f'{attr_name} = {attr_value}')
-                expression_attribute_names[attr_name] = db_field
-
-                # Convert float/int to Decimal for numeric fields (but not booleans!)
-                if isinstance(value, (int, float)) and value is not None and not isinstance(value, bool):
-                    try:
-                        value = Decimal(str(value))
-                    except Exception as e:
-                        app.logger.error(f"Error converting {api_field}={value} (type={type(value)}) to Decimal: {e}")
-                        raise
-
-                expression_attribute_values[attr_value] = value
-
-        # Add UpdatedAt timestamp
-        update_expression_parts.append('#UpdatedAt = :updated_at')
-        expression_attribute_names['#UpdatedAt'] = 'UpdatedAt'
-        expression_attribute_values[':updated_at'] = snapshot_timestamp
-
-        # Convert snapshot_item numeric values to Decimal for DynamoDB (but not booleans!)
-        for key, value in snapshot_item.items():
-            if isinstance(value, (int, float)) and not isinstance(value, bool):
-                snapshot_item[key] = Decimal(str(value))
-
-        # Also update RatesUpdatedAt if rates changed
-        if 'SellRate' in changes or 'BuyRate' in changes or 'SNOWUnitRate' in changes:
-            update_expression_parts.append('#RatesUpdatedAt = :rates_updated_at')
-            expression_attribute_names['#RatesUpdatedAt'] = 'RatesUpdatedAt'
-            expression_attribute_values[':rates_updated_at'] = snapshot_timestamp
-
-        # Update NormalizedName if name changed
-        if 'FirstName' in changes or 'LastName' in changes:
-            normalized_name = f"{update_data.get('first_name', '')} {update_data.get('last_name', '')}".strip().lower()
-            update_expression_parts.append('#NormalizedName = :normalized_name')
-            expression_attribute_names['#NormalizedName'] = 'NormalizedName'
-            expression_attribute_values[':normalized_name'] = normalized_name
-
-        update_expression = 'SET ' + ', '.join(update_expression_parts)
-
-        # Perform DynamoDB updates in a transaction-like manner
-        # 1. Put the snapshot
-        table.put_item(Item=snapshot_item)
-
-        # 2. Update the main record
-        table.update_item(
-            Key={
-                'PK': f'CONTRACTOR#{email}',
-                'SK': 'METADATA'
-            },
-            UpdateExpression=update_expression,
-            ExpressionAttributeNames=expression_attribute_names,
-            ExpressionAttributeValues=expression_attribute_values
-        )
-
-        # 3. Update GSI2 if name changed
-        if 'FirstName' in changes or 'LastName' in changes:
-            normalized_name = f"{update_data.get('first_name', '')} {update_data.get('last_name', '')}".strip().lower()
-            table.update_item(
-                Key={
-                    'PK': f'CONTRACTOR#{email}',
-                    'SK': 'METADATA'
-                },
-                UpdateExpression='SET #GSI2PK = :gsi2pk',
-                ExpressionAttributeNames={'#GSI2PK': 'GSI2PK'},
-                ExpressionAttributeValues={':gsi2pk': f'NAME#{normalized_name}'}
-            )
-
-        app.logger.info(f"Contractor {email} updated successfully. Snapshot created: {snapshot_sk}")
-
-        return jsonify({
-            'message': 'Contractor updated successfully',
-            'snapshot_created': True,
-            'snapshot_timestamp': snapshot_timestamp,
-            'changes': changes,
-            'snapshot_id': snapshot_sk
-        })
-
-    except ClientError as e:
-        app.logger.error(f"DynamoDB error updating contractor: {str(e)}")
-        return jsonify({'error': 'Database error', 'message': str(e)}), 500
-    except Exception as e:
-        import traceback
-        app.logger.error(f"Error updating contractor: {str(e)}")
-        app.logger.error(traceback.format_exc())
-        return jsonify({'error': 'Failed to update contractor', 'message': str(e), 'traceback': traceback.format_exc()}), 500
+################################################################################
+# ⛔ END LOCKED CODE - DO NOT MODIFY ABOVE ⛔
+################################################################################
 
 
 @app.route('/api/files/<file_id>/download', methods=['GET'])

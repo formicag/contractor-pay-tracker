@@ -198,13 +198,215 @@
     }
 
     .btn-cancel:hover {
-        background: var(--bg-primary);
+        background: var(--bg-secondary);
+    }
+
+    /* Lock Status Banner */
+    .lock-banner {
+        background: linear-gradient(135deg, #dc2626 0%, #b91c1c 100%);
+        color: white;
+        padding: 1rem 1.5rem;
+        border-radius: 0.5rem;
+        margin-bottom: 1.5rem;
+        border: 2px solid #991b1b;
+        box-shadow: 0 4px 12px rgba(220, 38, 38, 0.3);
+    }
+
+    .lock-banner-header {
+        display: flex;
+        align-items: center;
+        gap: 0.75rem;
+        font-size: 1.125rem;
+        font-weight: 700;
+        margin-bottom: 0.5rem;
+    }
+
+    .lock-icon {
+        font-size: 1.5rem;
+    }
+
+    .lock-banner-content {
+        font-size: 0.875rem;
+        opacity: 0.95;
+        line-height: 1.6;
+    }
+
+    .lock-banner ul {
+        margin: 0.5rem 0 0 1.5rem;
+        padding: 0;
+    }
+
+    .lock-banner li {
+        margin: 0.25rem 0;
+    }
+
+    /* Debug Panel Styles */
+    .debug-panel {
+        position: fixed;
+        bottom: 20px;
+        right: 20px;
+        width: 400px;
+        max-height: 500px;
+        background: #1a1a1a;
+        border: 2px solid #00ff00;
+        border-radius: 8px;
+        box-shadow: 0 4px 20px rgba(0, 255, 0, 0.3);
+        z-index: 9999;
+        display: flex;
+        flex-direction: column;
+        font-family: 'Courier New', monospace;
+    }
+
+    .debug-panel.minimized {
+        height: 50px;
+        overflow: hidden;
+    }
+
+    .debug-header {
+        background: #00ff00;
+        color: #000;
+        padding: 10px 15px;
+        font-weight: bold;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        cursor: pointer;
+        user-select: none;
+    }
+
+    .debug-header:hover {
+        background: #00dd00;
+    }
+
+    .debug-controls {
+        display: flex;
+        gap: 10px;
+    }
+
+    .debug-btn {
+        background: #000;
+        color: #00ff00;
+        border: 1px solid #00ff00;
+        padding: 3px 8px;
+        cursor: pointer;
+        border-radius: 3px;
+        font-size: 12px;
+    }
+
+    .debug-btn:hover {
+        background: #00ff00;
+        color: #000;
+    }
+
+    .debug-events {
+        flex: 1;
+        overflow-y: auto;
+        padding: 10px;
+        font-size: 11px;
+        color: #00ff00;
+        background: #000;
+    }
+
+    .debug-event {
+        margin-bottom: 8px;
+        padding: 5px;
+        border-left: 3px solid #00ff00;
+        padding-left: 8px;
+        animation: fadeIn 0.3s;
+    }
+
+    @keyframes fadeIn {
+        from { opacity: 0; transform: translateX(20px); }
+        to { opacity: 1; transform: translateX(0); }
+    }
+
+    .debug-event-type {
+        color: #ffff00;
+        font-weight: bold;
+        text-transform: uppercase;
+    }
+
+    .debug-event-time {
+        color: #888;
+        font-size: 10px;
+    }
+
+    .debug-event-data {
+        color: #0ff;
+        margin-top: 3px;
+        white-space: pre-wrap;
+        word-break: break-all;
+    }
+
+    .debug-event.error {
+        border-left-color: #ff0000;
+    }
+
+    .debug-event.error .debug-event-type {
+        color: #ff0000;
+    }
+
+    .debug-event.api_call {
+        border-left-color: #00ffff;
+    }
+
+    .debug-event.user_action {
+        border-left-color: #ffff00;
+    }
+
+    .debug-status {
+        background: #222;
+        padding: 5px 10px;
+        border-top: 1px solid #00ff00;
+        font-size: 10px;
+        display: flex;
+        justify-content: space-between;
+    }
+
+    .debug-status-dot {
+        display: inline-block;
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        margin-right: 5px;
+        animation: pulse 1s infinite;
+    }
+
+    .debug-status-dot.connected {
+        background: #00ff00;
+    }
+
+    .debug-status-dot.disconnected {
+        background: #ff0000;
+        animation: none;
+    }
+
+    @keyframes pulse {
+        0%, 100% { opacity: 1; }
+        50% { opacity: 0.5; }
     }
 </style>
 {% endblock %}
 
 {% block content %}
 <h2>Permanent Staff Management</h2>
+
+<!-- Lock Status Banner -->
+<div class="lock-banner" id="lock-banner">
+    <div class="lock-banner-header">
+        <span class="lock-icon">🔒</span>
+        <span>PERMANENT STAFF DATA IS PROTECTED</span>
+    </div>
+    <div class="lock-banner-content">
+        <strong>This data is READ-ONLY and cannot be modified without authorization.</strong>
+        <ul>
+            <li>All permanent staff records are password-protected</li>
+            <li>Modifications require administrator password</li>
+            <li>Data protection prevents accidental deletion or changes</li>
+        </ul>
+        <em>Contact system administrator for data modifications.</em>
+    </div>
+</div>
 
 <!-- Summary Cards -->
 <div class="summary-grid" id="summary-cards">
@@ -258,10 +460,6 @@
                     <input type="text" id="edit-last-name" required>
                 </div>
                 <div class="form-group">
-                    <label>Email</label>
-                    <input type="email" id="edit-email" readonly style="background: var(--bg-primary); opacity: 0.7;">
-                </div>
-                <div class="form-group">
                     <label>Job Title</label>
                     <input type="text" id="edit-job-title">
                 </div>
@@ -288,6 +486,22 @@
         </div>
     </div>
 </div>
+
+<!-- Debug Panel -->
+<div class="debug-panel" id="debug-panel">
+    <div class="debug-header" onclick="toggleDebugPanel()">
+        <span>🐛 DEBUG CONSOLE</span>
+        <div class="debug-controls" onclick="event.stopPropagation()">
+            <button class="debug-btn" onclick="clearDebugEvents()">Clear</button>
+            <button class="debug-btn" onclick="toggleDebugPanel()">−</button>
+        </div>
+    </div>
+    <div class="debug-events" id="debug-events"></div>
+    <div class="debug-status">
+        <span><span class="debug-status-dot connected" id="debug-status-dot"></span><span id="debug-status-text">Connected</span></span>
+        <span id="debug-event-count">0 events</span>
+    </div>
+</div>
 {% endblock %}
 
 {% block extra_js %}
@@ -301,23 +515,76 @@
     });
 
     async function loadStaff() {
+        console.log('═'.repeat(80));
+        console.log('[FRONTEND] LOADING PERMANENT STAFF');
+        console.log('═'.repeat(80));
+
         const container = document.getElementById('staff-container');
         container.innerHTML = '<div class="spinner"></div>';
 
+        console.log('[STEP 1] Preparing to fetch data');
+        console.log('  API endpoint: /api/perm-staff-lambda');
+        console.log('  Method: GET');
+
+        // Track page activity
+        trackAction('load_staff', { source: 'button_click' });
+
         try {
-            const response = await fetch('/api/perm-staff');
+            console.log('\n[STEP 2] Fetching data from API...');
+            const fetchStart = performance.now();
+
+            // Call Lambda-based API for guaranteed correct data
+            const response = await fetch('/api/perm-staff-lambda');
+
+            const fetchEnd = performance.now();
+            console.log(`✅ Fetch completed in ${(fetchEnd - fetchStart).toFixed(2)}ms`);
+            console.log(`  Status: ${response.status} ${response.statusText}`);
+            console.log(`  Headers:`, response.headers);
+
+            console.log('\n[STEP 3] Parsing JSON response...');
+            const parseStart = performance.now();
             const data = await response.json();
+            const parseEnd = performance.now();
+            console.log(`✅ JSON parsed in ${(parseEnd - parseStart).toFixed(2)}ms`);
+            console.log(`  Response keys:`, Object.keys(data));
+            console.log(`  Data:`, data);
 
             if (data.error) {
+                console.error('❌ API returned error:', data.error);
+                console.error('  Message:', data.message);
                 container.innerHTML = '<div class="alert alert-danger">Failed to load permanent staff: ' + (data.message || data.error) + '</div>';
                 return;
             }
 
+            console.log('\n[STEP 4] Processing staff data');
+            console.log(`  Staff array length: ${data.staff ? data.staff.length : 0}`);
+            console.log(`  Staff count: ${data.count}`);
+            console.log(`  Data source: ${data.source}`);
+
             allStaff = data.staff || [];
+            console.log(`  Stored ${allStaff.length} staff members in allStaff array`);
+
+            if (allStaff.length > 0) {
+                console.log('\n[STEP 4a] Sample staff member:');
+                console.log('  First staff:', allStaff[0]);
+                console.log('  Fields:', Object.keys(allStaff[0]));
+            }
+
+            console.log('\n[STEP 5] Updating summary cards...');
             updateSummaryCards();
+
+            console.log('\n[STEP 6] Displaying staff table...');
             displayStaff(allStaff);
 
+            console.log('\n✅ LOAD COMPLETE');
+            console.log('═'.repeat(80));
+
         } catch (error) {
+            console.error('═'.repeat(80));
+            console.error('❌ ERROR LOADING STAFF');
+            console.error('═'.repeat(80));
+            console.error('Error:', error);
+            console.error('Stack:', error.stack);
             container.innerHTML = '<div class="alert alert-danger">Failed to load permanent staff: ' + error.message + '</div>';
         }
     }
@@ -351,17 +618,30 @@
         }
 
         let html = `
-            <div class="table-container">
-                <table>
+            <div class="table-container" style="overflow-x: auto;">
+                <table style="min-width: 4000px; width: max-content;">
                     <thead>
                         <tr>
-                            <th class="sortable" onclick="sortTable('full_name')">Name</th>
-                            <th class="sortable" onclick="sortTable('job_title')">Job Title</th>
+                            <th class="sortable" onclick="sortTable('pk')">PK</th>
+                            <th class="sortable" onclick="sortTable('sk')">SK</th>
+                            <th class="sortable" onclick="sortTable('staff_id')">StaffID</th>
+                            <th class="sortable" onclick="sortTable('first_name')">FirstName</th>
+                            <th class="sortable" onclick="sortTable('last_name')">LastName</th>
+                            <th class="sortable" onclick="sortTable('full_name')">FullName</th>
+                            <th class="sortable" onclick="sortTable('job_title')">JobTitle</th>
                             <th class="sortable" onclick="sortTable('customer')">Customer</th>
-                            <th class="sortable" onclick="sortTable('engagement_type')">Engagement Type</th>
-                            <th class="sortable" onclick="sortTable('sell_rate')">Day Rate</th>
-                            <th class="sortable" onclick="sortTable('is_active')">Status</th>
-                            <th style="width: 50px;">Edit</th>
+                            <th class="sortable" onclick="sortTable('sow_service_name')">SowServiceName</th>
+                            <th class="sortable" onclick="sortTable('engagement_type')">EngagementType</th>
+                            <th class="sortable" onclick="sortTable('sell_rate')">SellRate</th>
+                            <th class="sortable" onclick="sortTable('currency')">Currency</th>
+                            <th class="sortable" onclick="sortTable('is_active')">IsActive</th>
+                            <th class="sortable" onclick="sortTable('entity_type')">EntityType</th>
+                            <th class="sortable" onclick="sortTable('created_at')">CreatedAt</th>
+                            <th class="sortable" onclick="sortTable('updated_at')">UpdatedAt</th>
+                            <th class="sortable" onclick="sortTable('gsi1_pk')">GSI1PK</th>
+                            <th class="sortable" onclick="sortTable('gsi1_sk')">GSI1SK</th>
+                            <th class="sortable" onclick="sortTable('gsi2_pk')">GSI2PK</th>
+                            <th class="sortable" onclick="sortTable('gsi2_sk')">GSI2SK</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -383,15 +663,26 @@
 
             html += `
                 <tr>
-                    <td><strong>${person.full_name}</strong></td>
+                    <td>${person.pk || 'N/A'}</td>
+                    <td>${person.sk || 'N/A'}</td>
+                    <td>${person.staff_id || 'N/A'}</td>
+                    <td>${person.first_name || 'N/A'}</td>
+                    <td>${person.last_name || 'N/A'}</td>
+                    <td><strong>${person.full_name || 'N/A'}</strong></td>
                     <td>${person.job_title || 'N/A'}</td>
                     <td>${person.customer || 'N/A'}</td>
+                    <td>${person.sow_service_name || 'N/A'}</td>
                     <td><span class="perm-staff-badge">${person.engagement_type || 'PAYE'}</span></td>
                     <td>${sellRate > 0 ? formatCurrency(sellRate) : 'N/A'}</td>
+                    <td>${person.currency || 'N/A'}</td>
                     <td>${statusBadge}</td>
-                    <td style="text-align: center;">
-                        <span class="edit-icon" onclick='openEditModal(${personJson})' title="Edit">✏️</span>
-                    </td>
+                    <td>${person.entity_type || 'N/A'}</td>
+                    <td>${person.created_at || 'N/A'}</td>
+                    <td>${person.updated_at || 'N/A'}</td>
+                    <td>${person.gsi1_pk || 'N/A'}</td>
+                    <td>${person.gsi1_sk || 'N/A'}</td>
+                    <td>${person.gsi2_pk || 'N/A'}</td>
+                    <td>${person.gsi2_sk || 'N/A'}</td>
                 </tr>
             `;
         });
@@ -456,12 +747,26 @@
 
         if (currentSort.column) {
             const columnMap = {
-                'full_name': 0,
-                'job_title': 1,
-                'customer': 2,
-                'engagement_type': 3,
-                'sell_rate': 4,
-                'is_active': 5
+                'pk': 0,
+                'sk': 1,
+                'staff_id': 2,
+                'first_name': 3,
+                'last_name': 4,
+                'full_name': 5,
+                'job_title': 6,
+                'customer': 7,
+                'sow_service_name': 8,
+                'engagement_type': 9,
+                'sell_rate': 10,
+                'currency': 11,
+                'is_active': 12,
+                'entity_type': 13,
+                'created_at': 14,
+                'updated_at': 15,
+                'gsi1_pk': 16,
+                'gsi1_sk': 17,
+                'gsi2_pk': 18,
+                'gsi2_sk': 19
             };
 
             const thIndex = columnMap[currentSort.column];
@@ -500,7 +805,6 @@
         // Populate form fields
         document.getElementById('edit-first-name').value = person.first_name || '';
         document.getElementById('edit-last-name').value = person.last_name || '';
-        document.getElementById('edit-email').value = person.email || '';
         document.getElementById('edit-job-title').value = person.job_title || '';
         document.getElementById('edit-customer').value = person.customer || '';
         document.getElementById('edit-sell-rate').value = person.sell_rate || '';
@@ -531,7 +835,7 @@
         };
 
         try {
-            const response = await fetch(`/api/perm-staff/${encodeURIComponent(currentEditPerson.email)}`, {
+            const response = await fetch(`/api/perm-staff/${encodeURIComponent(currentEditPerson.staff_id)}`, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json'
@@ -563,6 +867,146 @@
     document.getElementById('edit-modal').addEventListener('click', function(event) {
         if (event.target === this) {
             closeEditModal();
+        }
+    });
+
+    // ============================================================================
+    // DEBUG PANEL FUNCTIONALITY
+    // ============================================================================
+
+    let debugEventSource = null;
+    let debugEventCount = 0;
+
+    // Initialize debug panel
+    window.addEventListener('DOMContentLoaded', () => {
+        initDebugPanel();
+        trackAction('page_load', { page: 'perm-staff', url: window.location.href });
+    });
+
+    function initDebugPanel() {
+        // Connect to debug event stream
+        debugEventSource = new EventSource('/api/debug/stream');
+
+        debugEventSource.onopen = () => {
+            updateDebugStatus(true, 'Connected');
+            addDebugEvent({
+                type: 'system',
+                timestamp: new Date().toISOString(),
+                data: { message: '🟢 Debug stream connected' }
+            });
+        };
+
+        debugEventSource.onmessage = (event) => {
+            try {
+                const data = JSON.parse(event.data);
+                addDebugEvent(data);
+            } catch (e) {
+                console.error('Failed to parse debug event:', e);
+            }
+        };
+
+        debugEventSource.onerror = () => {
+            updateDebugStatus(false, 'Disconnected');
+            addDebugEvent({
+                type: 'error',
+                timestamp: new Date().toISOString(),
+                data: { message: '🔴 Debug stream disconnected' }
+            });
+
+            // Try to reconnect after 5 seconds
+            setTimeout(() => {
+                if (debugEventSource.readyState === EventSource.CLOSED) {
+                    initDebugPanel();
+                }
+            }, 5000);
+        };
+
+        // Track all click events
+        document.addEventListener('click', (e) => {
+            const target = e.target.closest('[onclick], button, a, input, select');
+            if (target) {
+                trackAction('click', {
+                    element: target.tagName,
+                    text: target.textContent?.substring(0, 50) || '',
+                    id: target.id || '',
+                    class: target.className || ''
+                });
+            }
+        });
+    }
+
+    function addDebugEvent(event) {
+        const container = document.getElementById('debug-events');
+        debugEventCount++;
+
+        const eventDiv = document.createElement('div');
+        eventDiv.className = `debug-event ${event.type}`;
+
+        const time = new Date(event.timestamp).toLocaleTimeString();
+
+        let dataStr = '';
+        if (event.data) {
+            if (typeof event.data === 'string') {
+                dataStr = event.data;
+            } else {
+                dataStr = JSON.stringify(event.data, null, 2);
+            }
+        }
+
+        eventDiv.innerHTML = `
+            <div class="debug-event-time">${time}</div>
+            <div class="debug-event-type">${event.type}</div>
+            <div class="debug-event-data">${dataStr}</div>
+        `;
+
+        container.appendChild(eventDiv);
+        container.scrollTop = container.scrollHeight;
+
+        // Update event count
+        document.getElementById('debug-event-count').textContent = `${debugEventCount} events`;
+
+        // Limit to last 100 events
+        while (container.children.length > 100) {
+            container.removeChild(container.firstChild);
+        }
+    }
+
+    function updateDebugStatus(connected, text) {
+        const dot = document.getElementById('debug-status-dot');
+        const statusText = document.getElementById('debug-status-text');
+
+        dot.className = `debug-status-dot ${connected ? 'connected' : 'disconnected'}`;
+        statusText.textContent = text;
+    }
+
+    function toggleDebugPanel() {
+        const panel = document.getElementById('debug-panel');
+        panel.classList.toggle('minimized');
+    }
+
+    function clearDebugEvents() {
+        document.getElementById('debug-events').innerHTML = '';
+        debugEventCount = 0;
+        document.getElementById('debug-event-count').textContent = '0 events';
+        trackAction('clear_debug', {});
+    }
+
+    async function trackAction(action, details) {
+        try {
+            await fetch('/api/debug/track', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ action, details })
+            });
+        } catch (e) {
+            console.error('Failed to track action:', e);
+        }
+    }
+
+    // Cleanup on page unload
+    window.addEventListener('beforeunload', () => {
+        if (debugEventSource) {
+            debugEventSource.close();
         }
     });
 </script>
