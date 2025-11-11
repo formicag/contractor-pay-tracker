@@ -238,10 +238,10 @@ def api_upload():
         if not file.filename.endswith('.xlsx'):
             return jsonify({'error': 'Only .xlsx files are supported'}), 400
 
-        # Generate unique file ID with timestamp
+        # Generate unique file ID (UUID)
         import time
+        file_id = str(uuid.uuid4())
         timestamp = int(time.time())
-        file_id = f"{file.filename.replace('.xlsx', '')}_{timestamp}"
         s3_key = f"production/{file.filename}"
 
         # Read file content
@@ -266,43 +266,128 @@ def api_upload():
 
         app.logger.info(f"Extracted {len(contractor_names)} contractors from {file.filename}: {contractor_names}")
 
-        # Create File metadata record in DynamoDB payfiles table
-        payfiles_table.put_item(
-            Item={
-                'file_id': file_id,
-                'filename': file.filename,
-                's3_key': s3_key,
-                's3_bucket': S3_BUCKET,
-                'file_size': file_size,
-                'umbrella_company': umbrella_company,
-                'contractor_name': contractor_name,
-                'contractor_names_list': contractor_names,  # Store full list
-                'contractor_count': len(contractor_names),
-                'uploaded_at': timestamp,
-                'status': 'uploaded',
-                'processing_status': 'completed' if contractor_names else 'failed',
-                'created_at': timestamp,
-                'updated_at': timestamp
-            }
+        # Match file to canonical customer groups
+        from canonical_matcher import match_file_to_canonical_groups, format_match_summary
+        canonical_match = match_file_to_canonical_groups(
+            filename=file.filename,
+            file_content=file_content,
+            min_score=0.75
         )
+
+        # Extract match details for storage
+        canonical_id = canonical_match['best_match']['canonical_id'] if canonical_match['match_found'] else None
+        canonical_group_name = canonical_match['best_match']['group_name'] if canonical_match['match_found'] else None
+        match_confidence = canonical_match['best_match']['confidence'] if canonical_match['match_found'] else None
+        match_via = canonical_match['best_match']['matched_via'] if canonical_match['match_found'] else None
+        match_summary = format_match_summary(canonical_match)
+
+        app.logger.info(f"Canonical group match for {file.filename}: {match_summary}")
+        if canonical_match['match_found']:
+            app.logger.info(f"  - Filename candidates: {canonical_match['filename_candidates']}")
+            app.logger.info(f"  - Content candidates: {canonical_match['content_candidates']}")
+            app.logger.info(f"  - Total matches: {len(canonical_match['all_matches'])}")
+
+        # Create File metadata record in DynamoDB using PascalCase schema
+        from decimal import Decimal
+        uploaded_at_iso = datetime.utcnow().isoformat() + 'Z'
+
+        item_data = {
+            # Primary Key fields
+            'PK': f'FILE#{file_id}',
+            'SK': 'METADATA',
+            'EntityType': 'File',
+
+            # File metadata (PascalCase)
+            'FileID': file_id,
+            'OriginalFilename': file.filename,
+            'S3Key': s3_key,
+            'S3Bucket': S3_BUCKET,
+            'FileSizeBytes': file_size,
+            'UmbrellaCode': umbrella_company.upper(),
+            'umbrella_code': umbrella_company.upper(),  # Also store lowercase for compatibility
+            'contractor_name': contractor_name,
+            'contractor_names_list': contractor_names,
+            'contractor_count': len(contractor_names),
+            'UploadedAt': uploaded_at_iso,
+            'Status': 'UPLOADED',
+            'processing_status': 'completed' if contractor_names else 'failed',
+            'Version': 1,
+            'IsCurrentVersion': True,
+
+            # GSI fields for querying
+            'GSI3PK': 'FILES',
+            'GSI3SK': uploaded_at_iso
+        }
+
+        # Add canonical group match data if found
+        if canonical_match['match_found']:
+            item_data['canonical_id'] = canonical_id
+            item_data['canonical_group_name'] = canonical_group_name
+            item_data['canonical_match_confidence'] = Decimal(str(match_confidence))
+            item_data['canonical_match_via'] = match_via
+            item_data['canonical_match_summary'] = match_summary
+
+        payfiles_table.put_item(Item=item_data)
 
         app.logger.info(f"File uploaded successfully: {file_id} -> s3://{S3_BUCKET}/{s3_key}")
 
-        return jsonify({
+        response_data = {
             'message': 'File uploaded successfully',
             'file_id': file_id,
             'filename': file.filename,
             'size': file_size,
             'umbrella_company': umbrella_company,
             's3_key': s3_key,
-            'status': 'uploaded'
-        })
+            'status': 'uploaded',
+            'contractor_count': len(contractor_names)
+        }
+
+        # Add canonical match info to response
+        if canonical_match['match_found']:
+            response_data['canonical_match'] = {
+                'found': True,
+                'canonical_id': canonical_id,
+                'group_name': canonical_group_name,
+                'confidence': match_confidence,
+                'matched_via': match_via,
+                'summary': match_summary
+            }
+        else:
+            response_data['canonical_match'] = {
+                'found': False,
+                'message': 'No canonical group match found'
+            }
+
+        return jsonify(response_data)
 
     except Exception as e:
         app.logger.error(f"Error uploading file: {str(e)}")
         import traceback
         app.logger.error(traceback.format_exc())
         return jsonify({'error': 'Failed to upload file', 'message': str(e)}), 500
+
+
+@app.route('/api/database-info', methods=['GET'])
+def api_database_info():
+    """
+    API endpoint to get database information including ARN
+
+    Returns: JSON with database metadata
+    """
+    try:
+        # Get table ARN from DynamoDB
+        table_arn = f"arn:aws:dynamodb:{AWS_REGION}:016164185850:table/{PAYFILES_TABLE}"
+
+        return jsonify({
+            'table_name': PAYFILES_TABLE,
+            'table_arn': table_arn,
+            'region': AWS_REGION,
+            'bucket_name': S3_BUCKET
+        })
+
+    except Exception as e:
+        app.logger.error(f"Error fetching database info: {str(e)}")
+        return jsonify({'error': 'Failed to fetch database info', 'message': str(e)}), 500
 
 
 @app.route('/api/files', methods=['GET'])
@@ -314,25 +399,36 @@ def api_files():
     """
     try:
         # Query DynamoDB payfiles table for all uploaded files
-        response = payfiles_table.scan()
+        # Filter for EntityType = 'File' to get only file records
+        response = payfiles_table.scan(
+            FilterExpression='EntityType = :et',
+            ExpressionAttributeValues={':et': 'File'}
+        )
 
         files_list = []
         for item in response.get('Items', []):
-            # Skip umbrella company reference data
-            if item.get('file_id', '').startswith('UMBRELLA#'):
-                continue
+            # Extract file info using the correct PascalCase attribute names
+            file_id = item.get('FileID')
 
-            # Extract file info from new schema
+            # Parse uploaded_at timestamp
+            uploaded_at_str = item.get('UploadedAt', '')
+            try:
+                from datetime import datetime
+                uploaded_at = int(datetime.fromisoformat(uploaded_at_str.replace('Z', '+00:00')).timestamp())
+            except:
+                uploaded_at = 0
+
             file_data = {
-                'file_id': item.get('file_id'),
-                'filename': item.get('filename', 'Unknown'),
-                'contractor_name': item.get('contractor_name', 'Unknown'),
-                'umbrella_company': item.get('umbrella_company', 'Unknown'),
-                'status': item.get('status', 'uploaded'),
-                'processing_status': item.get('processing_status', 'pending'),
-                'uploaded_at': item.get('uploaded_at', item.get('created_at', '')),
-                'file_size': item.get('file_size', 0),
-                's3_key': item.get('s3_key', '')
+                'file_id': file_id,
+                'filename': item.get('OriginalFilename', 'Unknown'),
+                'contractor_name': item.get('contractor_name', 'N/A'),
+                'umbrella_company': item.get('UmbrellaCode', item.get('umbrella_code', 'Unknown')),
+                'umbrella': item.get('UmbrellaCode', item.get('umbrella_code', 'Unknown')),
+                'status': item.get('Status', 'UNKNOWN'),
+                'processing_status': item.get('processing_status', item.get('Status', 'pending')),
+                'uploaded_at': uploaded_at,
+                'file_size': int(item.get('FileSizeBytes', 0)),
+                's3_key': item.get('S3Key', '')
             }
 
             files_list.append(file_data)
@@ -344,6 +440,8 @@ def api_files():
 
     except Exception as e:
         app.logger.error(f"Error fetching files: {str(e)}")
+        import traceback
+        app.logger.error(traceback.format_exc())
         return jsonify({'error': 'Failed to fetch files', 'message': str(e)}), 500
 
 # Old broken endpoints removed - replaced by file_management_endpoints.py
@@ -798,9 +896,22 @@ def api_perm_staff():
 def update_perm_staff(email):
     """
     API endpoint to update permanent staff member
+    🔒 LOCKED - Requires password "luca" to modify
 
     Returns: JSON with success status
     """
+    # Check for unlock password
+    from perm_staff_lock import verify_unlock_password
+
+    data = request.get_json() if request.is_json else {}
+    unlock_password = data.get('unlock_password') or request.headers.get('X-Unlock-Password')
+
+    if not verify_unlock_password(unlock_password):
+        return jsonify({
+            'error': 'Unauthorized',
+            'message': '🔒 Permanent staff data is LOCKED. Password required to modify.',
+            'locked': True
+        }), 403
     try:
         data = request.get_json()
 
@@ -867,6 +978,303 @@ def update_perm_staff(email):
     except Exception as e:
         app.logger.error(f"Error updating permanent staff {email}: {str(e)}")
         return jsonify({'success': False, 'error': 'Failed to update permanent staff', 'message': str(e)}), 500
+
+
+# ============================================================================
+# CANONICAL CUSTOMER GROUPS API ENDPOINTS
+# ============================================================================
+
+@app.route('/api/canonical-groups', methods=['GET'])
+def api_get_canonical_groups():
+    """
+    API endpoint to list all canonical customer groups
+
+    Returns: JSON with list of all groups
+    """
+    try:
+        from canonical_groups_manager import canonical_groups_manager
+
+        groups = canonical_groups_manager.get_all_groups()
+
+        return jsonify({
+            'success': True,
+            'groups': groups,
+            'total': len(groups)
+        })
+
+    except Exception as e:
+        app.logger.error(f"Error fetching canonical groups: {str(e)}")
+        return jsonify({
+            'success': False,
+            'error': 'Failed to fetch canonical groups',
+            'message': str(e)
+        }), 500
+
+
+@app.route('/api/canonical-groups/<canonical_id>', methods=['GET'])
+def api_get_canonical_group(canonical_id):
+    """
+    API endpoint to get a specific canonical customer group
+
+    Args:
+        canonical_id: The canonical group ID (e.g., CG-0001)
+
+    Returns: JSON with group details
+    """
+    try:
+        from canonical_groups_manager import canonical_groups_manager
+
+        group = canonical_groups_manager.get_group(canonical_id)
+
+        if not group:
+            return jsonify({
+                'success': False,
+                'error': 'Group not found',
+                'canonical_id': canonical_id
+            }), 404
+
+        return jsonify({
+            'success': True,
+            'group': group
+        })
+
+    except Exception as e:
+        app.logger.error(f"Error fetching canonical group {canonical_id}: {str(e)}")
+        return jsonify({
+            'success': False,
+            'error': 'Failed to fetch canonical group',
+            'message': str(e)
+        }), 500
+
+
+@app.route('/api/canonical-groups', methods=['POST'])
+def api_create_canonical_group():
+    """
+    API endpoint to create a new canonical customer group
+    🔒 LOCKED - Requires password "luca" to modify
+
+    Request body:
+        {
+            "canonical_id": "CG-0003",
+            "group_name": "Example Group",
+            "legal_entity": "Example Ltd",
+            "company_no": "12345678",
+            "unlock_password": "luca"
+        }
+
+    Returns: JSON with success status and created group
+    """
+    try:
+        from canonical_groups_manager import canonical_groups_manager
+
+        data = request.get_json()
+
+        # Extract required fields
+        canonical_id = data.get('canonical_id')
+        group_name = data.get('group_name')
+        legal_entity = data.get('legal_entity')
+        company_no = data.get('company_no')
+        unlock_password = data.get('unlock_password') or request.headers.get('X-Unlock-Password')
+
+        # Validate required fields
+        if not all([canonical_id, group_name, legal_entity, company_no]):
+            return jsonify({
+                'success': False,
+                'error': 'Missing required fields',
+                'required': ['canonical_id', 'group_name', 'legal_entity', 'company_no']
+            }), 400
+
+        # Create group
+        result = canonical_groups_manager.create_group(
+            canonical_id=canonical_id,
+            group_name=group_name,
+            legal_entity=legal_entity,
+            company_no=company_no,
+            unlock_password=unlock_password,
+            created_by='api'
+        )
+
+        if result['success']:
+            return jsonify(result), 201
+        else:
+            status_code = 403 if 'password' in result.get('error', '').lower() else 400
+            return jsonify(result), status_code
+
+    except Exception as e:
+        app.logger.error(f"Error creating canonical group: {str(e)}")
+        return jsonify({
+            'success': False,
+            'error': 'Failed to create canonical group',
+            'message': str(e)
+        }), 500
+
+
+@app.route('/api/canonical-groups/<canonical_id>/aliases', methods=['POST'])
+def api_add_canonical_alias(canonical_id):
+    """
+    API endpoint to add an alias to a canonical customer group
+    🔒 LOCKED - Requires password "luca" to modify
+
+    Args:
+        canonical_id: The canonical group ID
+
+    Request body:
+        {
+            "alias": "Example Brand",
+            "alias_type": "Brand",
+            "start_date": "2020-01-01",
+            "end_date": null,
+            "notes": "Optional notes",
+            "unlock_password": "luca"
+        }
+
+    Returns: JSON with success status and added alias
+    """
+    try:
+        from canonical_groups_manager import canonical_groups_manager
+
+        data = request.get_json()
+
+        # Extract fields
+        alias = data.get('alias')
+        alias_type = data.get('alias_type')
+        start_date = data.get('start_date')
+        end_date = data.get('end_date')
+        notes = data.get('notes', '')
+        unlock_password = data.get('unlock_password') or request.headers.get('X-Unlock-Password')
+
+        # Validate required fields
+        if not all([alias, alias_type]):
+            return jsonify({
+                'success': False,
+                'error': 'Missing required fields',
+                'required': ['alias', 'alias_type']
+            }), 400
+
+        # Add alias
+        result = canonical_groups_manager.add_alias(
+            canonical_id=canonical_id,
+            alias=alias,
+            alias_type=alias_type,
+            unlock_password=unlock_password,
+            start_date=start_date,
+            end_date=end_date,
+            notes=notes,
+            modified_by='api'
+        )
+
+        if result['success']:
+            return jsonify(result), 201
+        else:
+            status_code = 403 if 'password' in result.get('error', '').lower() else 400
+            return jsonify(result), status_code
+
+    except Exception as e:
+        app.logger.error(f"Error adding alias to group {canonical_id}: {str(e)}")
+        return jsonify({
+            'success': False,
+            'error': 'Failed to add alias',
+            'message': str(e)
+        }), 500
+
+
+@app.route('/api/canonical-groups/<canonical_id>', methods=['DELETE'])
+def api_delete_canonical_group(canonical_id):
+    """
+    API endpoint to delete a canonical customer group
+    🔒 LOCKED - Requires password "luca" to modify
+
+    Args:
+        canonical_id: The canonical group ID
+
+    Request body or header:
+        {
+            "unlock_password": "luca"
+        }
+        OR
+        X-Unlock-Password: luca
+
+    Returns: JSON with success status
+    """
+    try:
+        from canonical_groups_manager import canonical_groups_manager
+
+        data = request.get_json() if request.is_json else {}
+        unlock_password = data.get('unlock_password') or request.headers.get('X-Unlock-Password')
+
+        # Delete group
+        result = canonical_groups_manager.delete_group(
+            canonical_id=canonical_id,
+            unlock_password=unlock_password,
+            deleted_by='api'
+        )
+
+        if result['success']:
+            return jsonify(result), 200
+        else:
+            status_code = 403 if 'password' in result.get('error', '').lower() else 400
+            return jsonify(result), status_code
+
+    except Exception as e:
+        app.logger.error(f"Error deleting canonical group {canonical_id}: {str(e)}")
+        return jsonify({
+            'success': False,
+            'error': 'Failed to delete canonical group',
+            'message': str(e)
+        }), 500
+
+
+@app.route('/api/canonical-groups/match', methods=['POST'])
+def api_match_canonical_entity():
+    """
+    API endpoint to match an entity name against canonical customer groups
+
+    Request body:
+        {
+            "entity_name": "Company Name to Match",
+            "active_only": true,
+            "min_score": 0.75
+        }
+
+    Returns: JSON with list of matches sorted by score
+    """
+    try:
+        from canonical_groups_manager import canonical_groups_manager
+
+        data = request.get_json()
+
+        entity_name = data.get('entity_name')
+        active_only = data.get('active_only', True)
+        min_score = data.get('min_score', 0.75)
+
+        if not entity_name:
+            return jsonify({
+                'success': False,
+                'error': 'Missing required field: entity_name'
+            }), 400
+
+        # Match entity
+        matches = canonical_groups_manager.match_entity(
+            entity_name=entity_name,
+            active_only=active_only,
+            min_score=min_score
+        )
+
+        return jsonify({
+            'success': True,
+            'entity_name': entity_name,
+            'matches': matches,
+            'total_matches': len(matches),
+            'best_match': matches[0] if matches else None
+        })
+
+    except Exception as e:
+        app.logger.error(f"Error matching entity: {str(e)}")
+        return jsonify({
+            'success': False,
+            'error': 'Failed to match entity',
+            'message': str(e)
+        }), 500
 
 
 @app.route('/api/umbrella-stats', methods=['GET'])
@@ -1011,10 +1419,24 @@ def api_umbrella_stats():
 def api_update_contractor(email):
     """
     API endpoint to update contractor with full audit trail
+    🔒 LOCKED - Requires password "luca" to modify
 
-    Expects: JSON with contractor fields
+    Expects: JSON with contractor fields (must include unlock_password)
     Returns: JSON with success status and snapshot info
     """
+    # Check for unlock password
+    from perm_staff_lock import verify_unlock_password
+
+    data = request.get_json() if request.is_json else {}
+    unlock_password = data.get('unlock_password') or request.headers.get('X-Unlock-Password')
+
+    if not verify_unlock_password(unlock_password):
+        return jsonify({
+            'error': 'Unauthorized',
+            'message': '🔒 Contractor data is LOCKED. Password required to modify.',
+            'locked': True
+        }), 403
+
     try:
         # Get current contractor data for snapshot
         current_response = table.get_item(
