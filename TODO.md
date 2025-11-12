@@ -1,7 +1,7 @@
 # Contractor Pay Tracker - TODO List
 
-**Last Updated**: 2025-11-11
-**Current Status**: ⚠️ Infrastructure fixed, pipeline operational, blocked on data seeding
+**Last Updated**: 2025-11-12
+**Current Status**: ✅ Contractor-umbrella mapping system implemented and deployed
 
 ---
 
@@ -42,41 +42,39 @@
 - [x] Identify Flask API field name bug (CompanyName→LegalName)
 - [x] Update project documentation (PROJECT_CONTEXT.md, TODO.md)
 
+### Phase 5: Contractor-Umbrella Mapping System (DONE - 2025-11-12)
+- [x] Design ContractorUmbrellaMapping database schema (one-to-many support)
+- [x] Implement GET /api/contractor-umbrella-mappings endpoint
+- [x] Implement POST /api/contractor-umbrella-mappings endpoint
+- [x] Implement DELETE /api/contractor-umbrella-mappings endpoint
+- [x] Implement GET /api/umbrellas endpoint
+- [x] Build contractor-umbrella mapping UI page (/contractor-umbrella-mapping)
+- [x] Add navigation link to base template
+- [x] Update Lambda validation logic to use dynamic mappings
+- [x] Deploy Lambda layer v2 with updated validators.py
+- [x] Create 26 contractor-umbrella mappings (including Donna Smith double-mapping)
+- [x] Fix JavaScript dropdown loading bug (success field check)
+- [x] Test mapping creation and display functionality
+
 ---
 
 ## In Progress 🚧
 
-### CRITICAL: Data Seeding Blockers (P0)
-- [ ] **Fix contractor PROFILE records in seed_dynamodb.py**
-  - **What**: Update seeding script to create contractor PROFILE records
-  - **Why**: Validation fails without these records - blocks all processing
-  - **Effort**: Small (add PROFILE creation loop)
-  - **Priority**: P0 - BLOCKER
-  - **Location**: `backend/seed-data/seed_dynamodb.py`
-  - **Status**: Identified, not yet fixed
-
-- [ ] **Fix Flask API field name bug**
-  - **What**: Change `item.get('CompanyName')` to `item.get('LegalName')`
-  - **Why**: User explicitly asked why umbrella data not showing
-  - **Effort**: Trivial (single line change)
-  - **Priority**: P0 - User requested
-  - **Location**: `flask-app/app.py:~2487`
-  - **Status**: Identified, not yet fixed
-
-### User-Requested Testing (P0)
-- [ ] **Test complete end-to-end flow with test file**
-  - **What**: Upload test file, verify validation passes, verify TimeRecords created
-  - **Why**: Validate all infrastructure fixes work together
-  - **Effort**: Small (single test upload)
-  - **Priority**: P0 - Blocked by seeding fix
-  - **Dependencies**: Fix contractor PROFILE records first
+### Validation Testing (P1)
+- [ ] **Test end-to-end validation with fresh file upload**
+  - **What**: Upload new test file and verify validation passes with contractor-umbrella mappings
+  - **Why**: Validate that new mapping system works in production
+  - **Effort**: Small (single test upload + CloudWatch logs review)
+  - **Priority**: P1 - Verify deployment
+  - **Dependencies**: None (mappings already created)
+  - **Status**: Ready to test
 
 - [ ] **Process all 48 production files from InputData/**
   - **What**: Upload all 48 Excel files and verify processing
   - **Why**: User's primary request - "count shld be the number of foles in this directory"
   - **Effort**: Medium (bulk upload + monitoring)
   - **Priority**: P0 - User requested
-  - **Dependencies**: Fix contractor PROFILE records + verify single file first
+  - **Dependencies**: Verify single file validation first
 
 ---
 

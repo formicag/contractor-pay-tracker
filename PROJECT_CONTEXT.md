@@ -1,7 +1,7 @@
 # Contractor Pay Tracker - Project Context
 
-**Last Updated**: 2025-11-11
-**Status**: ⚠️ INFRASTRUCTURE FIXED - Pipeline operational, blocked on data seeding
+**Last Updated**: 2025-11-12
+**Status**: ✅ CONTRACTOR-UMBRELLA MAPPING SYSTEM IMPLEMENTED - Validation now uses dynamic mappings
 
 ---
 
@@ -21,22 +21,23 @@ AWS serverless application for processing contractor pay Excel files using SQS e
 
 ---
 
-## Current System State (2025-11-11)
+## Current System State (2025-11-12)
 
 ### Infrastructure Status ✅
 - **SQS Queues**: 6 queues operational (3 main + 3 DLQs)
-- **Lambda Functions**: 3 functions deployed with layer v36 ✅
+- **Lambda Functions**: 3 functions deployed with layer v2 ✅
 - **EventBridge Rules**: S3 upload rule active and enabled ✅
 - **Event Source Mappings**: All 3 Lambda-SQS connections configured ✅
-- **Lambda Layer v36**: Correctly structured with `python/` at root ✅
-- **Environment Variables**: Fixed TABLE_NAME on all 3 functions ✅
+- **Lambda Layer v2**: Updated with contractor-umbrella mapping support ✅
+- **Environment Variables**: TABLE_NAME configured on all 3 functions ✅
 
-### Data Status ⚠️
-- **Total DynamoDB Items**: ~18 (Umbrella companies only)
-- **PayRecords Created**: 0 ❌ (blocked on validation)
-- **TimeRecords Created**: 0 ❌ (blocked on validation)
-- **Contractor PROFILE Records**: 0 ❌ (BLOCKER - need to fix seeding)
-- **Contractor Associations**: ~50+ ✅ (exist in GSI1)
+### Data Status ✅
+- **Total DynamoDB Items**: ~50+ (Umbrella companies + Contractors + Mappings)
+- **Contractor PROFILE Records**: 24 ✅ (All contractors seeded)
+- **Umbrella Companies**: 6 ✅ (CLARITY, GIANT, NASA, PARASOL, PAYSTREAM, WORKWELL)
+- **Contractor-Umbrella Mappings**: 26 ✅ (Includes Donna Smith double-mapping)
+- **PayRecords Created**: Pending validation testing
+- **TimeRecords Created**: Pending validation testing
 
 ### What's Working ✅
 1. S3 file upload triggers EventBridge → SQS ✅
@@ -45,15 +46,50 @@ AWS serverless application for processing contractor pay Excel files using SQS e
 4. SQS message passing between stages ✅
 5. Detailed logging in validation stage ✅
 
-### What's Blocked ❌
-1. **Contractor validation fails** - No PROFILE records in DynamoDB
-2. **Import stage never runs** - Validation fails first
-3. **Dashboard shows no data** - No PayRecords created + Flask API field name bug
-4. **End-to-end testing** - Blocked on validation issue
+### What's Blocked ⚠️
+1. **End-to-end validation testing** - Need to test with fresh file upload after mapping deployment
+2. **Dashboard integration** - Mapping page functional but needs final validation testing
+3. **Lambda layer verification** - Need to confirm layer v2 active in production
 
 ---
 
-## Recent Critical Fixes (2025-11-11)
+## Recent Critical Fixes (2025-11-12)
+
+### NEW: Contractor-Umbrella Mapping System - ✅ IMPLEMENTED
+- **Feature**: Built complete contractor-umbrella mapping management system
+- **Problem Solved**: "No contractors found for umbrella company" validation errors
+- **Solution**: Dynamic database-driven mappings instead of hardcoded GSI3 lookups
+- **Components**:
+  1. **Database Schema**: ContractorUmbrellaMapping entity
+     - PK: `CONTRACTOR#{contractor_id}`
+     - SK: `UMBRELLA#{umbrella_id}`
+     - Supports one-to-many (e.g., Donna Smith → Parasol + NASA)
+  2. **API Endpoints**: 3 RESTful endpoints in Flask
+     - `GET /api/contractor-umbrella-mappings` - List all mappings
+     - `POST /api/contractor-umbrella-mappings` - Create new mapping
+     - `DELETE /api/contractor-umbrella-mappings/{contractor_id}/{umbrella_id}` - Remove mapping
+     - `GET /api/umbrellas` - List all umbrella companies
+  3. **UI Page**: `/contractor-umbrella-mapping` management interface
+     - Dropdown selection for contractors and umbrellas
+     - Real-time mapping creation/deletion
+     - Displays all existing mappings in table
+     - Handles special cases (multiple umbrellas per contractor)
+  4. **Lambda Validation Update**: Modified `validators.py`
+     - Query ContractorUmbrellaMapping via GSI1 (UMBRELLA#id → CONTRACTOR#id)
+     - Fetch contractor profiles using mapping IDs
+     - No more hardcoded umbrella-contractor associations
+- **Data Created**: 26 contractor-umbrella mappings (24 contractors, 2 duplicate for Donna Smith)
+- **Status**: ✅ DEPLOYED (Lambda layer v2)
+- **Files Modified**:
+  - `flask-app/app.py` - Added 3 API endpoints + umbrella endpoint
+  - `flask-app/templates/contractor_umbrella_mapping.html` - New UI page
+  - `flask-app/templates/base.html` - Added navigation link
+  - `backend/layers/common/python/common/validators.py` - Updated validation logic
+- **Testing**: UI functional, mappings created successfully
+
+---
+
+## Previous Critical Fixes (2025-11-11)
 
 ### BUG #1: Lambda Environment Variable Configuration - ✅ FIXED
 - **Issue**: All 3 Lambda functions had `TABLE_NAME` set to literal string `"$(terraform output -raw dynamodb_table_name)"`

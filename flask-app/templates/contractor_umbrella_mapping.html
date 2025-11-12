@@ -1,0 +1,808 @@
+{% extends "base.html" %}
+
+{% block title %}Contractor-Umbrella Mapping - {{ app_name }}{% endblock %}
+
+{% block extra_css %}
+<style>
+    /* ========================================================================
+       CONTRACTOR-UMBRELLA MAPPING PAGE STYLES
+       ======================================================================== */
+
+    /* Create Mapping Form Section */
+    .mapping-form-section {
+        background: var(--bg-secondary);
+        border: 1px solid var(--border);
+        border-radius: 0.5rem;
+        padding: 2rem;
+        margin-bottom: 2rem;
+    }
+
+    .form-row {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 1.5rem;
+        margin-bottom: 1.5rem;
+    }
+
+    .form-group {
+        display: flex;
+        flex-direction: column;
+    }
+
+    .form-group label {
+        font-weight: 600;
+        margin-bottom: 0.5rem;
+        color: var(--text-primary);
+        font-size: 0.875rem;
+    }
+
+    .form-group select {
+        padding: 0.75rem;
+        border: 1px solid var(--border);
+        border-radius: 0.375rem;
+        background: var(--bg-tertiary);
+        color: var(--text-primary);
+        font-size: 1rem;
+        cursor: pointer;
+        transition: all 0.2s ease;
+    }
+
+    .form-group select:focus {
+        outline: none;
+        border-color: var(--accent);
+        box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+    }
+
+    .form-group select:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+    }
+
+    .form-actions {
+        display: flex;
+        gap: 1rem;
+        justify-content: flex-end;
+    }
+
+    .btn {
+        padding: 0.75rem 1.5rem;
+        border-radius: 0.375rem;
+        font-weight: 600;
+        cursor: pointer;
+        transition: all 0.2s ease;
+        border: none;
+        font-size: 0.875rem;
+    }
+
+    .btn-primary {
+        background: var(--accent);
+        color: white;
+    }
+
+    .btn-primary:hover:not(:disabled) {
+        background: #2563eb;
+        transform: translateY(-1px);
+    }
+
+    .btn-primary:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+    }
+
+    .btn-secondary {
+        background: var(--bg-tertiary);
+        color: var(--text-primary);
+        border: 1px solid var(--border);
+    }
+
+    .btn-secondary:hover {
+        background: var(--bg-primary);
+    }
+
+    /* Mappings Table Section */
+    .mappings-table-section {
+        background: var(--bg-secondary);
+        border: 1px solid var(--border);
+        border-radius: 0.5rem;
+        padding: 2rem;
+    }
+
+    .section-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 1.5rem;
+    }
+
+    .section-title {
+        font-size: 1.25rem;
+        font-weight: 700;
+        color: var(--text-primary);
+    }
+
+    .mappings-count {
+        font-size: 0.875rem;
+        color: var(--text-secondary);
+        font-weight: 600;
+    }
+
+    .mappings-table {
+        width: 100%;
+        border-collapse: collapse;
+    }
+
+    .mappings-table thead {
+        background: var(--bg-tertiary);
+    }
+
+    .mappings-table th {
+        padding: 1rem;
+        text-align: left;
+        font-weight: 600;
+        color: var(--text-secondary);
+        font-size: 0.875rem;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        border-bottom: 2px solid var(--border);
+    }
+
+    .mappings-table td {
+        padding: 1rem;
+        border-bottom: 1px solid var(--border);
+        color: var(--text-primary);
+    }
+
+    .mappings-table tbody tr {
+        transition: background 0.2s ease;
+    }
+
+    .mappings-table tbody tr:hover {
+        background: var(--bg-tertiary);
+    }
+
+    .delete-mapping-btn {
+        background: #dc2626;
+        color: white;
+        border: none;
+        padding: 0.5rem 1rem;
+        border-radius: 0.375rem;
+        cursor: pointer;
+        font-weight: 600;
+        font-size: 0.875rem;
+        transition: all 0.2s ease;
+    }
+
+    .delete-mapping-btn:hover {
+        background: #b91c1c;
+        transform: translateY(-1px);
+    }
+
+    /* Empty State */
+    .empty-state {
+        text-align: center;
+        padding: 3rem;
+        color: var(--text-secondary);
+    }
+
+    .empty-state-icon {
+        font-size: 4rem;
+        margin-bottom: 1rem;
+        opacity: 0.5;
+    }
+
+    /* Alert Messages */
+    .alert {
+        padding: 1rem;
+        border-radius: 0.375rem;
+        margin-bottom: 1rem;
+        font-weight: 500;
+    }
+
+    .alert-success {
+        background: rgba(16, 185, 129, 0.1);
+        border: 1px solid rgba(16, 185, 129, 0.3);
+        color: #10b981;
+    }
+
+    .alert-error {
+        background: rgba(239, 68, 68, 0.1);
+        border: 1px solid rgba(239, 68, 68, 0.3);
+        color: #ef4444;
+    }
+
+    .alert-info {
+        background: rgba(59, 130, 246, 0.1);
+        border: 1px solid rgba(59, 130, 246, 0.3);
+        color: #3b82f6;
+    }
+
+    /* Loading Spinner */
+    .spinner-small {
+        display: inline-block;
+        width: 1rem;
+        height: 1rem;
+        border: 2px solid rgba(255, 255, 255, 0.3);
+        border-top-color: white;
+        border-radius: 50%;
+        animation: spin 0.6s linear infinite;
+    }
+
+    @keyframes spin {
+        to { transform: rotate(360deg); }
+    }
+
+    /* Info Box */
+    .info-box {
+        background: rgba(59, 130, 246, 0.1);
+        border: 1px solid rgba(59, 130, 246, 0.3);
+        border-radius: 0.5rem;
+        padding: 1.5rem;
+        margin-bottom: 2rem;
+    }
+
+    .info-box h3 {
+        color: var(--accent);
+        margin-bottom: 0.75rem;
+        font-size: 1rem;
+        font-weight: 700;
+    }
+
+    .info-box p {
+        color: var(--text-secondary);
+        font-size: 0.875rem;
+        line-height: 1.6;
+        margin-bottom: 0.5rem;
+    }
+
+    .info-box ul {
+        margin-left: 1.5rem;
+        color: var(--text-secondary);
+        font-size: 0.875rem;
+    }
+
+    .info-box ul li {
+        margin-bottom: 0.25rem;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<!-- ============================================================================
+     CONTRACTOR-UMBRELLA MAPPING MANAGEMENT PAGE
+
+     PURPOSE:
+     - Create linkages between contractors and umbrella companies
+     - View existing mappings
+     - Delete mappings when contractor changes umbrella
+
+     FEATURES:
+     - Support for one contractor → multiple umbrellas (e.g., Donna Smith)
+     - Dropdown selection for contractors and umbrellas
+     - Real-time form validation
+     - Detailed error messages
+     - Extensive logging to browser console
+
+     USAGE:
+     1. Select contractor from dropdown
+     2. Select umbrella company from dropdown
+     3. Click "Create Mapping"
+     4. Mapping appears in table below
+     5. Can delete mappings using trash icon
+
+     ============================================================================ -->
+
+<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+    <h2>Contractor-Umbrella Mapping</h2>
+    <button class="btn btn-secondary" onclick="location.reload()">↻ Refresh</button>
+</div>
+
+<!-- Info Box -->
+<div class="info-box">
+    <h3>ℹ️ About Contractor-Umbrella Mappings</h3>
+    <p>
+        This page allows you to link contractors to their umbrella companies. This is required for validation to pass when processing pay files.
+    </p>
+    <p><strong>Key Features:</strong></p>
+    <ul>
+        <li>One contractor can be linked to multiple umbrellas (e.g., if they switched companies)</li>
+        <li>Example: Donna Smith worked for Parasol (Jan-Jun), then NASA (Jul onwards)</li>
+        <li>Create both mappings so validation passes regardless of which umbrella the file comes from</li>
+        <li>Mappings can be deleted and recreated if made in error</li>
+    </ul>
+</div>
+
+<!-- Alert Container (for success/error messages) -->
+<div id="alert-container"></div>
+
+<!-- Create New Mapping Section -->
+<div class="mapping-form-section">
+    <h3 style="margin-bottom: 1.5rem; color: var(--text-primary);">Create New Mapping</h3>
+
+    <div class="form-row">
+        <div class="form-group">
+            <label for="contractor-select">Contractor *</label>
+            <select id="contractor-select">
+                <option value="">Loading contractors...</option>
+            </select>
+        </div>
+
+        <div class="form-group">
+            <label for="umbrella-select">Umbrella Company *</label>
+            <select id="umbrella-select">
+                <option value="">Loading umbrellas...</option>
+            </select>
+        </div>
+    </div>
+
+    <div class="form-actions">
+        <button class="btn btn-secondary" onclick="resetForm()">Cancel</button>
+        <button class="btn btn-primary" id="create-mapping-btn" onclick="createMapping()" disabled>
+            <span id="create-btn-text">Create Mapping</span>
+            <span id="create-btn-spinner" style="display: none;"><span class="spinner-small"></span></span>
+        </button>
+    </div>
+</div>
+
+<!-- Existing Mappings Table Section -->
+<div class="mappings-table-section">
+    <div class="section-header">
+        <h3 class="section-title">Existing Mappings</h3>
+        <span class="mappings-count" id="mappings-count">0 mappings</span>
+    </div>
+
+    <div id="mappings-table-container">
+        <div class="empty-state">
+            <div class="spinner"></div>
+            <p>Loading mappings...</p>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    // ========================================================================
+    // CONTRACTOR-UMBRELLA MAPPING - JAVASCRIPT
+    //
+    // LOGGING STRATEGY:
+    // - All functions log their start/end
+    // - All API calls logged with request/response
+    // - All errors logged with full details
+    // - Use browser console to debug issues
+    //
+    // GLOBAL STATE:
+    // - contractors: Array of all contractors
+    // - umbrellas: Array of all umbrella companies
+    // - mappings: Array of existing mappings
+    // ========================================================================
+
+    // Global state
+    let contractors = [];
+    let umbrellas = [];
+    let mappings = [];
+
+    console.log('[MAPPING PAGE] Script loaded');
+    console.log('[MAPPING PAGE] Initializing contractor-umbrella mapping management');
+
+    // Initialize on page load
+    window.addEventListener('DOMContentLoaded', () => {
+        console.log('[MAPPING PAGE] DOM Content Loaded');
+        console.log('[MAPPING PAGE] Starting data loading sequence...');
+
+        // Load contractors, umbrellas, and existing mappings
+        Promise.all([
+            loadContractors(),
+            loadUmbrellas(),
+            loadMappings()
+        ]).then(() => {
+            console.log('[MAPPING PAGE] ✅ All data loaded successfully');
+        }).catch(error => {
+            console.error('[MAPPING PAGE] ❌ Error during initialization:', error);
+            showAlert('Failed to initialize page: ' + error.message, 'error');
+        });
+    });
+
+    /**
+     * Load all contractors from API
+     *
+     * PURPOSE: Populate contractor dropdown
+     * ENDPOINT: GET /api/contractors
+     * LOGGING: Start, success with count, or error
+     */
+    async function loadContractors() {
+        console.log('[LOAD CONTRACTORS] Starting contractor load...');
+
+        try {
+            console.log('[LOAD CONTRACTORS] Fetching from /api/contractors');
+            const response = await fetch('/api/contractors');
+
+            if (!response.ok) {
+                throw new Error(`HTTP error! status: ${response.status}`);
+            }
+
+            const data = await response.json();
+            console.log('[LOAD CONTRACTORS] Response received:', data);
+
+            contractors = data.contractors || [];
+            console.log(`[LOAD CONTRACTORS] ✅ Loaded ${contractors.length} contractors`);
+
+            // Populate dropdown
+            const select = document.getElementById('contractor-select');
+            select.innerHTML = '<option value="">-- Select Contractor --</option>';
+
+            contractors.forEach(contractor => {
+                const option = document.createElement('option');
+                option.value = contractor.contractor_id;
+                option.textContent = contractor.full_name;
+                select.appendChild(option);
+            });
+
+            console.log('[LOAD CONTRACTORS] Dropdown populated with contractors');
+
+            // Enable form validation
+            validateForm();
+
+        } catch (error) {
+            console.error('[LOAD CONTRACTORS] ❌ Error loading contractors:', error);
+            const select = document.getElementById('contractor-select');
+            select.innerHTML = '<option value="">Error loading contractors</option>';
+            throw error;
+        }
+    }
+
+    /**
+     * Load all umbrella companies from API
+     *
+     * PURPOSE: Populate umbrella dropdown
+     * ENDPOINT: GET /api/umbrellas
+     * LOGGING: Start, success with count, or error
+     */
+    async function loadUmbrellas() {
+        console.log('[LOAD UMBRELLAS] Starting umbrella load...');
+
+        try {
+            console.log('[LOAD UMBRELLAS] Fetching from /api/umbrellas');
+            const response = await fetch('/api/umbrellas');
+
+            if (!response.ok) {
+                throw new Error(`HTTP error! status: ${response.status}`);
+            }
+
+            const data = await response.json();
+            console.log('[LOAD UMBRELLAS] Response received:', data);
+
+            umbrellas = data.umbrellas || [];
+            console.log(`[LOAD UMBRELLAS] ✅ Loaded ${umbrellas.length} umbrellas`);
+
+            // Populate dropdown
+            const select = document.getElementById('umbrella-select');
+            select.innerHTML = '<option value="">-- Select Umbrella Company --</option>';
+
+            umbrellas.forEach(umbrella => {
+                const option = document.createElement('option');
+                option.value = umbrella.umbrella_id;
+                option.textContent = umbrella.short_code;
+                select.appendChild(option);
+            });
+
+            console.log('[LOAD UMBRELLAS] Dropdown populated with umbrellas');
+
+            // Enable form validation
+            validateForm();
+
+        } catch (error) {
+            console.error('[LOAD UMBRELLAS] ❌ Error loading umbrellas:', error);
+            const select = document.getElementById('umbrella-select');
+            select.innerHTML = '<option value="">Error loading umbrellas</option>';
+            throw error;
+        }
+    }
+
+    /**
+     * Load existing contractor-umbrella mappings
+     *
+     * PURPOSE: Display current mappings in table
+     * ENDPOINT: GET /api/contractor-umbrella-mappings
+     * LOGGING: Start, success with count, or error
+     */
+    async function loadMappings() {
+        console.log('[LOAD MAPPINGS] Starting mappings load...');
+
+        const container = document.getElementById('mappings-table-container');
+        container.innerHTML = '<div class="empty-state"><div class="spinner"></div><p>Loading mappings...</p></div>';
+
+        try {
+            console.log('[LOAD MAPPINGS] Fetching from /api/contractor-umbrella-mappings');
+            const response = await fetch('/api/contractor-umbrella-mappings');
+
+            if (!response.ok) {
+                throw new Error(`HTTP error! status: ${response.status}`);
+            }
+
+            const data = await response.json();
+            console.log('[LOAD MAPPINGS] Response received:', data);
+
+            mappings = data.mappings || [];
+            console.log(`[LOAD MAPPINGS] ✅ Loaded ${mappings.length} mappings`);
+
+            // Update count
+            document.getElementById('mappings-count').textContent =
+                `${mappings.length} mapping${mappings.length !== 1 ? 's' : ''}`;
+
+            // Display mappings table
+            displayMappings();
+
+        } catch (error) {
+            console.error('[LOAD MAPPINGS] ❌ Error loading mappings:', error);
+            container.innerHTML = `
+                <div class="empty-state">
+                    <div class="empty-state-icon">❌</div>
+                    <p>Failed to load mappings: ${error.message}</p>
+                </div>
+            `;
+        }
+    }
+
+    /**
+     * Display mappings in table
+     *
+     * PURPOSE: Render mappings as HTML table
+     * CALLED BY: loadMappings()
+     * LOGGING: Rendering details
+     */
+    function displayMappings() {
+        console.log('[DISPLAY MAPPINGS] Rendering mappings table...');
+
+        const container = document.getElementById('mappings-table-container');
+
+        if (mappings.length === 0) {
+            console.log('[DISPLAY MAPPINGS] No mappings to display');
+            container.innerHTML = `
+                <div class="empty-state">
+                    <div class="empty-state-icon">🔗</div>
+                    <h3>No Mappings Yet</h3>
+                    <p>Create your first contractor-umbrella mapping using the form above</p>
+                </div>
+            `;
+            return;
+        }
+
+        console.log(`[DISPLAY MAPPINGS] Rendering ${mappings.length} mappings`);
+
+        let html = `
+            <table class="mappings-table">
+                <thead>
+                    <tr>
+                        <th>Contractor</th>
+                        <th>Umbrella Company</th>
+                        <th>Created</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+        `;
+
+        mappings.forEach((mapping, index) => {
+            console.log(`[DISPLAY MAPPINGS] Rendering mapping ${index + 1}: ${mapping.contractor_name} → ${mapping.umbrella_code}`);
+
+            const createdDate = new Date(mapping.created_at).toLocaleDateString('en-GB');
+
+            html += `
+                <tr>
+                    <td>${mapping.contractor_name}</td>
+                    <td><strong>${mapping.umbrella_code}</strong></td>
+                    <td>${createdDate}</td>
+                    <td>
+                        <button
+                            class="delete-mapping-btn"
+                            onclick="deleteMapping('${mapping.contractor_id}', '${mapping.umbrella_id}', '${mapping.contractor_name}', '${mapping.umbrella_code}')"
+                            title="Delete mapping">
+                            🗑️ Delete
+                        </button>
+                    </td>
+                </tr>
+            `;
+        });
+
+        html += `
+                </tbody>
+            </table>
+        `;
+
+        container.innerHTML = html;
+        console.log('[DISPLAY MAPPINGS] ✅ Table rendered successfully');
+    }
+
+    /**
+     * Validate form and enable/disable submit button
+     *
+     * PURPOSE: Ensure both contractor and umbrella selected
+     * CALLED BY: Dropdown change events
+     * LOGGING: Validation status
+     */
+    function validateForm() {
+        console.log('[VALIDATE FORM] Checking form validity...');
+
+        const contractorId = document.getElementById('contractor-select').value;
+        const umbrellaId = document.getElementById('umbrella-select').value;
+        const submitBtn = document.getElementById('create-mapping-btn');
+
+        const isValid = contractorId && umbrellaId;
+        console.log(`[VALIDATE FORM] Contractor: ${contractorId ? 'selected' : 'not selected'}`);
+        console.log(`[VALIDATE FORM] Umbrella: ${umbrellaId ? 'selected' : 'not selected'}`);
+        console.log(`[VALIDATE FORM] Form valid: ${isValid}`);
+
+        submitBtn.disabled = !isValid;
+    }
+
+    // Attach validation to dropdowns
+    document.addEventListener('DOMContentLoaded', () => {
+        document.getElementById('contractor-select').addEventListener('change', validateForm);
+        document.getElementById('umbrella-select').addEventListener('change', validateForm);
+    });
+
+    /**
+     * Create new contractor-umbrella mapping
+     *
+     * PURPOSE: Submit new mapping to API
+     * ENDPOINT: POST /api/contractor-umbrella-mappings
+     * LOGGING: Full request/response details
+     */
+    async function createMapping() {
+        console.log('[CREATE MAPPING] Creating new mapping...');
+
+        const contractorId = document.getElementById('contractor-select').value;
+        const umbrellaId = document.getElementById('umbrella-select').value;
+
+        console.log(`[CREATE MAPPING] Contractor ID: ${contractorId}`);
+        console.log(`[CREATE MAPPING] Umbrella ID: ${umbrellaId}`);
+
+        // Get names for logging
+        const contractorName = document.getElementById('contractor-select').selectedOptions[0].text;
+        const umbrellaCode = document.getElementById('umbrella-select').selectedOptions[0].text;
+
+        console.log(`[CREATE MAPPING] Creating: ${contractorName} → ${umbrellaCode}`);
+
+        // Show loading state
+        const submitBtn = document.getElementById('create-mapping-btn');
+        const btnText = document.getElementById('create-btn-text');
+        const btnSpinner = document.getElementById('create-btn-spinner');
+
+        submitBtn.disabled = true;
+        btnText.style.display = 'none';
+        btnSpinner.style.display = 'inline-block';
+
+        try {
+            console.log('[CREATE MAPPING] Sending POST request to /api/contractor-umbrella-mappings');
+
+            const requestBody = {
+                contractor_id: contractorId,
+                umbrella_id: umbrellaId
+            };
+            console.log('[CREATE MAPPING] Request body:', requestBody);
+
+            const response = await fetch('/api/contractor-umbrella-mappings', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify(requestBody)
+            });
+
+            const data = await response.json();
+            console.log('[CREATE MAPPING] Response received:', data);
+
+            if (!data.success) {
+                throw new Error(data.message || data.error || 'Failed to create mapping');
+            }
+
+            console.log('[CREATE MAPPING] ✅ Mapping created successfully');
+            showAlert(`✅ Success! Linked ${contractorName} to ${umbrellaCode}`, 'success');
+
+            // Reset form and reload mappings
+            resetForm();
+            await loadMappings();
+
+        } catch (error) {
+            console.error('[CREATE MAPPING] ❌ Error creating mapping:', error);
+            showAlert('❌ Failed to create mapping: ' + error.message, 'error');
+        } finally {
+            // Restore button state
+            submitBtn.disabled = false;
+            btnText.style.display = 'inline';
+            btnSpinner.style.display = 'none';
+        }
+    }
+
+    /**
+     * Delete contractor-umbrella mapping
+     *
+     * PURPOSE: Remove mapping from database
+     * ENDPOINT: DELETE /api/contractor-umbrella-mappings/{contractor_id}/{umbrella_id}
+     * LOGGING: Full deletion details
+     */
+    async function deleteMapping(contractorId, umbrellaId, contractorName, umbrellaCode) {
+        console.log('[DELETE MAPPING] Delete requested...');
+        console.log(`[DELETE MAPPING] Contractor: ${contractorName} (${contractorId})`);
+        console.log(`[DELETE MAPPING] Umbrella: ${umbrellaCode} (${umbrellaId})`);
+
+        // Confirm deletion
+        const confirmed = confirm(`Are you sure you want to delete this mapping?\n\n${contractorName} → ${umbrellaCode}\n\nThis action cannot be undone.`);
+
+        if (!confirmed) {
+            console.log('[DELETE MAPPING] Deletion cancelled by user');
+            return;
+        }
+
+        console.log('[DELETE MAPPING] Deletion confirmed, proceeding...');
+
+        try {
+            console.log(`[DELETE MAPPING] Sending DELETE request to /api/contractor-umbrella-mappings/${contractorId}/${umbrellaId}`);
+
+            const response = await fetch(`/api/contractor-umbrella-mappings/${contractorId}/${umbrellaId}`, {
+                method: 'DELETE'
+            });
+
+            const data = await response.json();
+            console.log('[DELETE MAPPING] Response received:', data);
+
+            if (!data.success) {
+                throw new Error(data.message || data.error || 'Failed to delete mapping');
+            }
+
+            console.log('[DELETE MAPPING] ✅ Mapping deleted successfully');
+            showAlert(`✅ Deleted mapping: ${contractorName} → ${umbrellaCode}`, 'success');
+
+            // Reload mappings
+            await loadMappings();
+
+        } catch (error) {
+            console.error('[DELETE MAPPING] ❌ Error deleting mapping:', error);
+            showAlert('❌ Failed to delete mapping: ' + error.message, 'error');
+        }
+    }
+
+    /**
+     * Reset form to initial state
+     *
+     * PURPOSE: Clear form selections
+     * LOGGING: Reset action
+     */
+    function resetForm() {
+        console.log('[RESET FORM] Resetting form to initial state');
+
+        document.getElementById('contractor-select').value = '';
+        document.getElementById('umbrella-select').value = '';
+        validateForm();
+
+        console.log('[RESET FORM] ✅ Form reset complete');
+    }
+
+    /**
+     * Show alert message to user
+     *
+     * PURPOSE: Display success/error/info messages
+     * PARAMETERS: message (string), type ('success'|'error'|'info')
+     * LOGGING: Alert display
+     */
+    function showAlert(message, type = 'info') {
+        console.log(`[SHOW ALERT] Displaying ${type} alert: ${message}`);
+
+        const container = document.getElementById('alert-container');
+        const alertDiv = document.createElement('div');
+        alertDiv.className = `alert alert-${type}`;
+        alertDiv.textContent = message;
+
+        container.innerHTML = '';
+        container.appendChild(alertDiv);
+
+        // Auto-remove after 5 seconds
+        setTimeout(() => {
+            console.log('[SHOW ALERT] Auto-removing alert');
+            alertDiv.remove();
+        }, 5000);
+    }
+
+    console.log('[MAPPING PAGE] All functions defined and ready');
+</script>
+{% endblock %}

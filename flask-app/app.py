@@ -163,6 +163,13 @@ def debug():
     return render_template('debug.html')
 
 
+@app.route('/pay-files')
+def pay_files():
+    """Pay files management page with cards per umbrella"""
+    print("[ROUTE] /pay-files accessed")
+    return render_template('pay_files.html')
+
+
 @app.route('/ops/debug-files')
 def debug_files():
     """Debug files page - Three-panel view for operations"""
@@ -763,8 +770,8 @@ def api_contractors():
     Returns: JSON with contractors list
     """
     try:
-        # Query DynamoDB for Contractor entities from contractor-pay-development table
-        response = payfiles_table.scan(
+        # Query DynamoDB for Contractor entities from contractor-pay-contractors-development table
+        response = contractors_table.scan(
             FilterExpression='EntityType = :et',
             ExpressionAttributeValues={
                 ':et': 'Contractor'
@@ -781,6 +788,7 @@ def api_contractors():
 
             # Convert Decimal to float for rates
             sell_rate = float(item.get('SellRate', 0))
+            buy_rate = float(item.get('BuyRate', 0))
 
             contractor_data = {
                 'contractor_id': contractor_id,
@@ -791,6 +799,7 @@ def api_contractors():
                 'job_title': item.get('JobTitle', 'N/A'),
                 'umbrella_company': item.get('UmbrellaCompany', 'N/A'),
                 'sell_rate': sell_rate,
+                'buy_rate': buy_rate,
                 'is_active': item.get('IsActive', True),
                 'created_at': item.get('CreatedAt', ''),
                 'engagement_type': item.get('EngagementType', 'N/A'),
@@ -808,6 +817,80 @@ def api_contractors():
         import traceback
         app.logger.error(traceback.format_exc())
         return jsonify({'error': 'Failed to fetch contractors', 'message': str(e)}), 500
+
+
+@app.route('/api/umbrellas', methods=['GET'])
+def api_get_umbrellas():
+    """
+    GET all umbrella companies
+
+    PURPOSE:
+    - Return list of all umbrella companies for dropdown selection
+    - Used by contractor-umbrella mapping page
+
+    RETURNS:
+    {
+        "success": true,
+        "umbrellas": [
+            {
+                "umbrella_id": "uuid",
+                "short_code": "CLARITY",
+                "full_name": "Clarity Umbrella Solutions Limited"
+            },
+            ...
+        ]
+    }
+
+    LOGGING:
+    - API call logged with result count
+    """
+    print("[API] GET /api/umbrellas called")
+    print(f"[API] Querying umbrellas from table: {umbrellas_table.table_name}")
+
+    try:
+        # Query all umbrella companies
+        print("[API] Scanning umbrella companies table...")
+        response = umbrellas_table.scan(
+            FilterExpression='EntityType = :et',
+            ExpressionAttributeValues={
+                ':et': 'Umbrella'
+            }
+        )
+
+        items = response.get('Items', [])
+        print(f"[API] Found {len(items)} umbrella companies")
+
+        # Transform to API format
+        umbrellas = []
+        for item in items:
+            umbrella = {
+                'umbrella_id': item.get('UmbrellaID'),
+                'short_code': item.get('UmbrellaCode'),  # Fixed: Use UmbrellaCode not ShortCode
+                'full_name': item.get('LegalName', item.get('CompanyName', 'Unknown'))
+            }
+            umbrellas.append(umbrella)
+            print(f"[API]   - {umbrella['short_code']}: {umbrella['full_name']}")
+
+        # Sort by short code
+        umbrellas.sort(key=lambda x: x['short_code'])
+
+        print(f"[API] SUCCESS: Returning {len(umbrellas)} umbrella companies")
+
+        return jsonify({
+            'success': True,
+            'umbrellas': umbrellas
+        })
+
+    except Exception as e:
+        print(f"[API] ❌ ERROR: Failed to fetch umbrellas")
+        print(f"[API] Error: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({
+            'success': False,
+            'error': 'Failed to fetch umbrellas',
+            'message': str(e)
+        }), 500
 
 
 @app.route('/api/perm-staff/lock-status', methods=['GET'])
@@ -1697,6 +1780,636 @@ def not_found(error):
 def internal_error(error):
     """500 error handler"""
     return render_template('500.html'), 500
+
+
+@app.route('/api/pay-files', methods=['GET'])
+def api_pay_files():
+    """Get all pay files grouped by umbrella company"""
+    print("[PAY-FILES API] GET /api/pay-files called")
+
+    try:
+        # Query all files that are not deleted from main table
+        print("[PAY-FILES API] Querying files from main table")
+        files_response = table.scan(
+            FilterExpression='EntityType = :et AND IsDeleted = :not_deleted',
+            ExpressionAttributeValues={
+                ':et': 'File',
+                ':not_deleted': False
+            }
+        )
+
+        files = files_response.get('Items', [])
+        print(f"[PAY-FILES API] Found {len(files)} active files")
+
+        # Group files by umbrella
+        umbrellas_map = {}
+
+        for file_item in files:
+            umbrella_code = file_item.get('UmbrellaCode', 'UNKNOWN')
+
+            if umbrella_code not in umbrellas_map:
+                umbrellas_map[umbrella_code] = {
+                    'umbrella_code': umbrella_code,
+                    'umbrella_id': file_item.get('UmbrellaID'),
+                    'pay_files': []
+                }
+
+            # Format file data
+            pay_file = {
+                'file_id': file_item.get('FileID'),
+                'period': file_item.get('Period', 'Unknown'),
+                'submission_date': file_item.get('SubmissionDate', ''),
+                'total_amount': float(file_item.get('TotalAmount', 0)),
+                'currency': file_item.get('Currency', 'GBP'),
+                'contractor_count': file_item.get('ContractorCount', 0),
+                'uploaded_at': file_item.get('UploadedAt', ''),
+                'is_deleted': file_item.get('IsDeleted', False),
+                'version': file_item.get('Version', 1),
+                'status': file_item.get('Status', 'UNKNOWN')
+            }
+
+            umbrellas_map[umbrella_code]['pay_files'].append(pay_file)
+
+        # Convert to list and sort pay_files by submission date (oldest first)
+        umbrellas_list = []
+        for umbrella_code in sorted(umbrellas_map.keys()):
+            umbrella_data = umbrellas_map[umbrella_code]
+
+            # Sort pay files by submission date (oldest → newest)
+            umbrella_data['pay_files'].sort(key=lambda x: x['submission_date'])
+
+            umbrellas_list.append(umbrella_data)
+
+        print(f"[PAY-FILES API] Returning {len(umbrellas_list)} umbrellas")
+
+        return jsonify({
+            'success': True,
+            'umbrellas': umbrellas_list,
+            'total_files': len(files)
+        })
+
+    except Exception as e:
+        print(f"[PAY-FILES API] Error: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({
+            'error': 'Failed to fetch pay files',
+            'message': str(e)
+        }), 500
+
+
+@app.route('/api/pay-files/<file_id>', methods=['DELETE'])
+def api_delete_pay_file(file_id):
+    """Soft delete a pay file and all associated TimeRecords"""
+    print(f"[DELETE PAY-FILE API] DELETE /api/pay-files/{file_id} called")
+
+    try:
+        data = request.get_json() or {}
+        deleted_by = data.get('deleted_by', 'system')
+        reason = data.get('reason', 'USER_DELETED')
+
+        print(f"[DELETE PAY-FILE API] Deleting file {file_id}, reason: {reason}")
+
+        # Step 1: Mark file as deleted
+        current_time = datetime.utcnow().isoformat() + 'Z'
+
+        print(f"[DELETE PAY-FILE API] Updating file metadata to mark as deleted")
+        table.update_item(
+            Key={
+                'PK': f'FILE#{file_id}',
+                'SK': 'METADATA'
+            },
+            UpdateExpression='SET IsDeleted = :deleted, DeletedAt = :deleted_at, DeletedBy = :deleted_by, DeletedReason = :reason, IsCurrentVersion = :not_current',
+            ExpressionAttributeValues={
+                ':deleted': True,
+                ':deleted_at': current_time,
+                ':deleted_by': deleted_by,
+                ':reason': reason,
+                ':not_current': False
+            }
+        )
+
+        print(f"[DELETE PAY-FILE API] File marked as deleted successfully")
+
+        # Step 2: Delete all TimeRecords for this file
+        print(f"[DELETE PAY-FILE API] Querying TimeRecords for file {file_id}")
+
+        time_records_response = table.scan(
+            FilterExpression='EntityType = :et AND FileID = :fid',
+            ExpressionAttributeValues={
+                ':et': 'TimeRecord',
+                ':fid': file_id
+            }
+        )
+
+        time_records = time_records_response.get('Items', [])
+        print(f"[DELETE PAY-FILE API] Found {len(time_records)} TimeRecords to delete")
+
+        if time_records:
+            # Batch delete TimeRecords
+            with table.batch_writer() as batch:
+                for record in time_records:
+                    batch.delete_item(
+                        Key={
+                            'PK': record['PK'],
+                            'SK': record['SK']
+                        }
+                    )
+            print(f"[DELETE PAY-FILE API] TimeRecords deleted successfully")
+
+        print(f"[DELETE PAY-FILE API] Delete operation complete")
+
+        return jsonify({
+            'success': True,
+            'file_id': file_id,
+            'deleted_at': current_time,
+            'time_records_deleted': len(time_records)
+        })
+
+    except Exception as e:
+        print(f"[DELETE PAY-FILE API] Error: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({
+            'error': 'Failed to delete pay file',
+            'message': str(e)
+        }), 500
+
+
+# ============================================================================
+# CONTRACTOR-UMBRELLA MAPPING MANAGEMENT
+# ============================================================================
+# Purpose: Manage the linkage between contractors and umbrella companies
+#
+# Key Features:
+# - Support one-to-many relationships (one contractor can have multiple umbrellas)
+# - Handle contractor transitions (e.g., Donna Smith: Parasol → NASA)
+# - Validation Lambda uses these mappings to verify contractor belongs to umbrella
+#
+# Data Model:
+# PK: CONTRACTOR#{contractor_id}
+# SK: UMBRELLA#{umbrella_id}
+# EntityType: ContractorUmbrellaMapping
+# ContractorID, ContractorName, UmbrellaID, UmbrellaCode, CreatedAt, CreatedBy
+# ============================================================================
+
+@app.route('/contractor-umbrella-mapping')
+def contractor_umbrella_mapping_page():
+    """
+    Contractor-Umbrella Mapping Management Page
+
+    PURPOSE:
+    - Provides UI for creating/viewing/deleting contractor-umbrella linkages
+    - Solves validation error: "No contractors found for umbrella company"
+
+    USER STORY:
+    - Admin needs to link contractors to their umbrella companies
+    - Some contractors (e.g., Donna Smith) worked for multiple umbrellas
+    - System needs to validate contractor belongs to umbrella in pay file
+
+    LOGGING:
+    - Route access logged to CloudWatch via Flask logging middleware
+    """
+    print("[MAPPING PAGE] /contractor-umbrella-mapping accessed")
+    print("[MAPPING PAGE] Rendering contractor_umbrella_mapping.html template")
+
+    return render_template('contractor_umbrella_mapping.html')
+
+
+@app.route('/api/contractor-umbrella-mappings', methods=['GET'])
+def api_get_contractor_umbrella_mappings():
+    """
+    GET all contractor-umbrella mappings
+
+    PURPOSE:
+    - Retrieve all existing contractor-umbrella linkages
+    - Used by UI to display current mappings table
+
+    RETURNS:
+    {
+        "success": true,
+        "mappings": [
+            {
+                "contractor_id": "uuid",
+                "contractor_name": "Donna Smith",
+                "umbrella_id": "uuid",
+                "umbrella_code": "PARASOL",
+                "created_at": "2025-11-12T...",
+                "created_by": "user"
+            },
+            ...
+        ],
+        "total_mappings": 25
+    }
+
+    DATA MODEL:
+    - Stored in main table as EntityType: ContractorUmbrellaMapping
+    - PK: CONTRACTOR#{contractor_id}, SK: UMBRELLA#{umbrella_id}
+    - Allows one contractor to have multiple umbrella links
+
+    LOGGING:
+    - Query start/end times
+    - Number of mappings found
+    - Any errors during scan
+    """
+    print("[API] GET /api/contractor-umbrella-mappings called")
+    print("[API] Starting contractor-umbrella mappings retrieval...")
+
+    try:
+        # STEP 1: Scan main table for all ContractorUmbrellaMapping entities
+        print("[API] STEP 1: Scanning main table for ContractorUmbrellaMapping entities")
+        print(f"[API] Table: {table.table_name}")
+        print(f"[API] Filter: EntityType = 'ContractorUmbrellaMapping'")
+
+        response = table.scan(
+            FilterExpression='EntityType = :entity_type',
+            ExpressionAttributeValues={
+                ':entity_type': 'ContractorUmbrellaMapping'
+            }
+        )
+
+        items = response.get('Items', [])
+        print(f"[API] STEP 1 COMPLETE: Found {len(items)} mapping(s)")
+
+        # STEP 2: Transform DynamoDB items to API response format
+        print("[API] STEP 2: Transforming DynamoDB items to API format")
+        mappings = []
+
+        for idx, item in enumerate(items):
+            print(f"[API] Processing mapping {idx + 1}/{len(items)}")
+            print(f"[API]   - Contractor: {item.get('ContractorName', 'N/A')}")
+            print(f"[API]   - Umbrella: {item.get('UmbrellaCode', 'N/A')}")
+
+            mapping = {
+                'contractor_id': item.get('ContractorID'),
+                'contractor_name': item.get('ContractorName'),
+                'umbrella_id': item.get('UmbrellaID'),
+                'umbrella_code': item.get('UmbrellaCode'),
+                'created_at': item.get('CreatedAt'),
+                'created_by': item.get('CreatedBy', 'system')
+            }
+            mappings.append(mapping)
+
+        print(f"[API] STEP 2 COMPLETE: Transformed {len(mappings)} mapping(s)")
+
+        # STEP 3: Sort by contractor name for UI display
+        print("[API] STEP 3: Sorting mappings by contractor name")
+        mappings.sort(key=lambda x: x['contractor_name'])
+        print("[API] STEP 3 COMPLETE: Mappings sorted")
+
+        # STEP 4: Return successful response
+        print(f"[API] SUCCESS: Returning {len(mappings)} mappings")
+
+        return jsonify({
+            'success': True,
+            'mappings': mappings,
+            'total_mappings': len(mappings)
+        })
+
+    except Exception as e:
+        # ERROR HANDLING: Log full exception details
+        print(f"[API] ❌ ERROR: Failed to retrieve contractor-umbrella mappings")
+        print(f"[API] Error type: {type(e).__name__}")
+        print(f"[API] Error message: {str(e)}")
+
+        import traceback
+        print(f"[API] Full traceback:")
+        traceback.print_exc()
+
+        return jsonify({
+            'success': False,
+            'error': 'Failed to retrieve mappings',
+            'message': str(e)
+        }), 500
+
+
+@app.route('/api/contractor-umbrella-mappings', methods=['POST'])
+def api_create_contractor_umbrella_mapping():
+    """
+    CREATE a new contractor-umbrella mapping
+
+    PURPOSE:
+    - Link a contractor to an umbrella company
+    - Supports multiple umbrellas per contractor (for transitions)
+
+    REQUEST BODY:
+    {
+        "contractor_id": "uuid",
+        "umbrella_id": "uuid"
+    }
+
+    PROCESS:
+    1. Validate contractor and umbrella exist
+    2. Check if mapping already exists (prevent duplicates)
+    3. Fetch contractor and umbrella details
+    4. Create mapping record in DynamoDB
+    5. Return success with mapping details
+
+    DATA STORED:
+    - PK: CONTRACTOR#{contractor_id}
+    - SK: UMBRELLA#{umbrella_id}
+    - EntityType: ContractorUmbrellaMapping
+    - ContractorID, ContractorName, UmbrellaID, UmbrellaCode
+    - CreatedAt, CreatedBy (audit fields)
+
+    LOGGING:
+    - Each validation step
+    - Database queries
+    - Success/failure with details
+    """
+    print("[API] POST /api/contractor-umbrella-mappings called")
+    print("[API] Creating new contractor-umbrella mapping...")
+
+    try:
+        # STEP 1: Parse and validate request body
+        print("[API] STEP 1: Parsing request body")
+        data = request.get_json()
+        print(f"[API] Request data: {data}")
+
+        contractor_id = data.get('contractor_id')
+        umbrella_id = data.get('umbrella_id')
+
+        print(f"[API] Contractor ID: {contractor_id}")
+        print(f"[API] Umbrella ID: {umbrella_id}")
+
+        # Validation: Check required fields
+        if not contractor_id or not umbrella_id:
+            print("[API] ❌ VALIDATION FAILED: Missing required fields")
+            return jsonify({
+                'success': False,
+                'error': 'Missing required fields: contractor_id and umbrella_id'
+            }), 400
+
+        print("[API] STEP 1 COMPLETE: Request validated")
+
+        # STEP 2: Check if mapping already exists
+        print("[API] STEP 2: Checking if mapping already exists")
+        print(f"[API] Query: PK=CONTRACTOR#{contractor_id}, SK=UMBRELLA#{umbrella_id}")
+
+        try:
+            existing = table.get_item(
+                Key={
+                    'PK': f'CONTRACTOR#{contractor_id}',
+                    'SK': f'UMBRELLA#{umbrella_id}'
+                }
+            )
+
+            if 'Item' in existing:
+                print("[API] ⚠️  DUPLICATE DETECTED: Mapping already exists")
+                print(f"[API] Existing mapping: {existing['Item']}")
+                return jsonify({
+                    'success': False,
+                    'error': 'Mapping already exists',
+                    'message': 'This contractor is already linked to this umbrella company'
+                }), 409
+
+            print("[API] STEP 2 COMPLETE: No duplicate found, safe to create")
+
+        except Exception as check_error:
+            print(f"[API] ⚠️  Could not check for existing mapping: {check_error}")
+            print("[API] Continuing with creation anyway...")
+
+        # STEP 3: Fetch contractor details
+        print("[API] STEP 3: Fetching contractor details from database")
+        print(f"[API] Query: PK=CONTRACTOR#{contractor_id}, SK=PROFILE")
+
+        contractor_response = table.get_item(
+            Key={
+                'PK': f'CONTRACTOR#{contractor_id}',
+                'SK': 'PROFILE'
+            }
+        )
+
+        if 'Item' not in contractor_response:
+            print(f"[API] ❌ ERROR: Contractor not found with ID {contractor_id}")
+            return jsonify({
+                'success': False,
+                'error': 'Contractor not found',
+                'message': f'No contractor found with ID {contractor_id}'
+            }), 404
+
+        contractor = contractor_response['Item']
+        contractor_name = f"{contractor.get('FirstName', '')} {contractor.get('LastName', '')}".strip()
+        print(f"[API] STEP 3 COMPLETE: Found contractor: {contractor_name}")
+
+        # STEP 4: Fetch umbrella details
+        print("[API] STEP 4: Fetching umbrella details from umbrellas table")
+        print(f"[API] Query: PK=UMBRELLA#{umbrella_id}, SK=PROFILE")
+
+        umbrella_response = umbrellas_table.get_item(
+            Key={
+                'PK': f'UMBRELLA#{umbrella_id}',
+                'SK': 'PROFILE'  # Fixed: Use PROFILE not METADATA
+            }
+        )
+
+        if 'Item' not in umbrella_response:
+            print(f"[API] ❌ ERROR: Umbrella not found with ID {umbrella_id}")
+            return jsonify({
+                'success': False,
+                'error': 'Umbrella not found',
+                'message': f'No umbrella company found with ID {umbrella_id}'
+            }), 404
+
+        umbrella = umbrella_response['Item']
+
+        # DEBUG: Print full umbrella item to see what fields we have
+        print(f"[API] DEBUG: Full umbrella item keys: {list(umbrella.keys())}")
+        print(f"[API] DEBUG: UmbrellaCode value: {umbrella.get('UmbrellaCode')}")
+        print(f"[API] DEBUG: UmbrellaCode type: {type(umbrella.get('UmbrellaCode'))}")
+
+        umbrella_code = umbrella.get('UmbrellaCode')  # Fixed: Use UmbrellaCode not ShortCode
+        print(f"[API] STEP 4 COMPLETE: Found umbrella: {umbrella_code}")
+
+        # STEP 5: Create mapping record
+        print("[API] STEP 5: Creating contractor-umbrella mapping record")
+
+        current_time = datetime.utcnow().isoformat() + 'Z'
+
+        mapping_item = {
+            # Primary Keys
+            'PK': f'CONTRACTOR#{contractor_id}',
+            'SK': f'UMBRELLA#{umbrella_id}',
+
+            # Entity Type
+            'EntityType': 'ContractorUmbrellaMapping',
+
+            # Contractor Details
+            'ContractorID': contractor_id,
+            'ContractorName': contractor_name,
+
+            # Umbrella Details
+            'UmbrellaID': umbrella_id,
+            'UmbrellaCode': umbrella_code,
+
+            # Audit Fields
+            'CreatedAt': current_time,
+            'CreatedBy': data.get('created_by', 'user'),
+
+            # GSI for reverse lookups (umbrella → contractors)
+            'GSI1PK': f'UMBRELLA#{umbrella_id}',
+            'GSI1SK': f'CONTRACTOR#{contractor_id}'
+        }
+
+        print(f"[API] Mapping item prepared:")
+        print(f"[API]   PK: {mapping_item['PK']}")
+        print(f"[API]   SK: {mapping_item['SK']}")
+        print(f"[API]   Contractor: {contractor_name}")
+        print(f"[API]   Umbrella: {umbrella_code}")
+        print(f"[API]   Created: {current_time}")
+
+        # Write to DynamoDB
+        print("[API] Writing mapping to DynamoDB...")
+        table.put_item(Item=mapping_item)
+        print("[API] STEP 5 COMPLETE: Mapping created successfully")
+
+        # STEP 6: Return success response
+        print("[API] SUCCESS: Contractor-umbrella mapping created")
+        print(f"[API] Mapping: {contractor_name} → {umbrella_code}")
+
+        return jsonify({
+            'success': True,
+            'mapping': {
+                'contractor_id': contractor_id,
+                'contractor_name': contractor_name,
+                'umbrella_id': umbrella_id,
+                'umbrella_code': umbrella_code,
+                'created_at': current_time,
+                'created_by': mapping_item['CreatedBy']
+            }
+        }), 201
+
+    except Exception as e:
+        # ERROR HANDLING: Log full exception details
+        print(f"[API] ❌ ERROR: Failed to create contractor-umbrella mapping")
+        print(f"[API] Error type: {type(e).__name__}")
+        print(f"[API] Error message: {str(e)}")
+
+        import traceback
+        print(f"[API] Full traceback:")
+        traceback.print_exc()
+
+        return jsonify({
+            'success': False,
+            'error': 'Failed to create mapping',
+            'message': str(e)
+        }), 500
+
+
+@app.route('/api/contractor-umbrella-mappings/<contractor_id>/<umbrella_id>', methods=['DELETE'])
+def api_delete_contractor_umbrella_mapping(contractor_id, umbrella_id):
+    """
+    DELETE a contractor-umbrella mapping
+
+    PURPOSE:
+    - Remove linkage between contractor and umbrella
+    - Used when contractor changes umbrella or mapping was created in error
+
+    URL PARAMETERS:
+    - contractor_id: UUID of contractor
+    - umbrella_id: UUID of umbrella company
+
+    PROCESS:
+    1. Validate IDs provided
+    2. Check mapping exists
+    3. Delete mapping from DynamoDB
+    4. Return success confirmation
+
+    IMPORTANT NOTES:
+    - This is a hard delete (not soft delete)
+    - Mapping can be recreated if deleted by mistake
+    - Does NOT delete contractor or umbrella records
+    - Only removes the linkage between them
+
+    LOGGING:
+    - Deletion request details
+    - Confirmation of deletion
+    - Any errors during deletion
+    """
+    print(f"[API] DELETE /api/contractor-umbrella-mappings/{contractor_id}/{umbrella_id} called")
+    print("[API] Deleting contractor-umbrella mapping...")
+
+    try:
+        # STEP 1: Validate parameters
+        print("[API] STEP 1: Validating URL parameters")
+        print(f"[API] Contractor ID: {contractor_id}")
+        print(f"[API] Umbrella ID: {umbrella_id}")
+
+        if not contractor_id or not umbrella_id:
+            print("[API] ❌ VALIDATION FAILED: Missing contractor_id or umbrella_id")
+            return jsonify({
+                'success': False,
+                'error': 'Missing required parameters: contractor_id and umbrella_id'
+            }), 400
+
+        print("[API] STEP 1 COMPLETE: Parameters validated")
+
+        # STEP 2: Check if mapping exists before deleting
+        print("[API] STEP 2: Checking if mapping exists")
+        print(f"[API] Query: PK=CONTRACTOR#{contractor_id}, SK=UMBRELLA#{umbrella_id}")
+
+        existing = table.get_item(
+            Key={
+                'PK': f'CONTRACTOR#{contractor_id}',
+                'SK': f'UMBRELLA#{umbrella_id}'
+            }
+        )
+
+        if 'Item' not in existing:
+            print("[API] ⚠️  NOT FOUND: Mapping does not exist")
+            return jsonify({
+                'success': False,
+                'error': 'Mapping not found',
+                'message': 'No mapping exists between this contractor and umbrella'
+            }), 404
+
+        mapping_item = existing['Item']
+        contractor_name = mapping_item.get('ContractorName', 'Unknown')
+        umbrella_code = mapping_item.get('UmbrellaCode', 'Unknown')
+
+        print(f"[API] STEP 2 COMPLETE: Found mapping: {contractor_name} → {umbrella_code}")
+
+        # STEP 3: Delete mapping from DynamoDB
+        print("[API] STEP 3: Deleting mapping from DynamoDB")
+        print(f"[API] Deleting: {contractor_name} → {umbrella_code}")
+
+        table.delete_item(
+            Key={
+                'PK': f'CONTRACTOR#{contractor_id}',
+                'SK': f'UMBRELLA#{umbrella_id}'
+            }
+        )
+
+        print("[API] STEP 3 COMPLETE: Mapping deleted successfully")
+
+        # STEP 4: Return success response
+        print("[API] SUCCESS: Contractor-umbrella mapping deleted")
+        print(f"[API] Deleted mapping: {contractor_name} → {umbrella_code}")
+
+        return jsonify({
+            'success': True,
+            'contractor_id': contractor_id,
+            'umbrella_id': umbrella_id,
+            'contractor_name': contractor_name,
+            'umbrella_code': umbrella_code,
+            'message': f'Mapping deleted: {contractor_name} → {umbrella_code}'
+        })
+
+    except Exception as e:
+        # ERROR HANDLING: Log full exception details
+        print(f"[API] ❌ ERROR: Failed to delete contractor-umbrella mapping")
+        print(f"[API] Error type: {type(e).__name__}")
+        print(f"[API] Error message: {str(e)}")
+
+        import traceback
+        print(f"[API] Full traceback:")
+        traceback.print_exc()
+
+        return jsonify({
+            'success': False,
+            'error': 'Failed to delete mapping',
+            'message': str(e)
+        }), 500
 
 
 @app.context_processor

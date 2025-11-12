@@ -883,54 +883,95 @@ def validate_contractor_name(contractor_name: str, umbrella_id: str, dynamodb_cl
         }
 
     # Query all active contractors for this umbrella
-    print(f"[VALIDATE_CONTRACTOR_NAME] Querying contractors for umbrella: {umbrella_id}")
+    # NEW APPROACH: Use ContractorUmbrellaMapping records to find contractors
+    print(f"[VALIDATE_CONTRACTOR_NAME] === STEP 1: Query contractor-umbrella mappings ===")
+    print(f"[VALIDATE_CONTRACTOR_NAME] Input umbrella_id: '{umbrella_id}'")
+    print(f"[VALIDATE_CONTRACTOR_NAME] Input umbrella_id type: {type(umbrella_id)}")
 
     try:
-        # Query GSI1 for contractor-umbrella associations
-        response = dynamodb_client.table.query(
+        # STEP 1: Query GSI1 for ContractorUmbrellaMapping records
+        # GSI1PK = UMBRELLA#{umbrella_id}, GSI1SK = CONTRACTOR#{contractor_id}
+        print(f"[VALIDATE_CONTRACTOR_NAME] === STEP 2: Construct GSI1 query parameters ===")
+        gsi1_pk_value = f'UMBRELLA#{umbrella_id}'
+        print(f"[VALIDATE_CONTRACTOR_NAME] Constructing GSI1PK query value: '{gsi1_pk_value}'")
+        print(f"[VALIDATE_CONTRACTOR_NAME] Using IndexName: 'GSI1'")
+        print(f"[VALIDATE_CONTRACTOR_NAME] KeyConditionExpression: 'GSI1PK = :pk AND begins_with(GSI1SK, :sk)'")
+        print(f"[VALIDATE_CONTRACTOR_NAME] :pk = '{gsi1_pk_value}'")
+        print(f"[VALIDATE_CONTRACTOR_NAME] :sk = 'CONTRACTOR'")
+
+        print(f"[VALIDATE_CONTRACTOR_NAME] === STEP 3: Execute DynamoDB query for mappings ===")
+        mappings_response = dynamodb_client.table.query(
             IndexName='GSI1',
-            KeyConditionExpression='GSI1PK = :pk',
+            KeyConditionExpression='GSI1PK = :pk AND begins_with(GSI1SK, :sk)',
+            FilterExpression='EntityType = :entity_type',
             ExpressionAttributeValues={
-                ':pk': f'UMBRELLA#{umbrella_id}'
+                ':pk': gsi1_pk_value,
+                ':sk': 'CONTRACTOR',
+                ':entity_type': 'ContractorUmbrellaMapping'
             }
         )
 
-        associations = response.get('Items', [])
-        print(f"[VALIDATE_CONTRACTOR_NAME] Found {len(associations)} contractor associations for umbrella {umbrella_id}")
+        print(f"[VALIDATE_CONTRACTOR_NAME] === STEP 4: Process mapping records ===")
+        mappings = mappings_response.get('Items', [])
+        print(f"[VALIDATE_CONTRACTOR_NAME] Found {len(mappings)} contractor-umbrella mappings")
 
-        # Extract contractor IDs from associations and load contractor profiles
-        contractors = []
-        for idx, assoc in enumerate(associations):
-            print(f"[VALIDATE_CONTRACTOR_NAME] Processing association {idx+1}/{len(associations)}")
-            contractor_id = assoc.get('ContractorID')
-            print(f"[VALIDATE_CONTRACTOR_NAME] ContractorID from association: {contractor_id}")
-
+        # STEP 2: Extract contractor IDs from mappings
+        contractor_ids = []
+        for mapping in mappings:
+            contractor_id = mapping.get('ContractorID')
             if contractor_id:
-                # Load contractor PROFILE record
-                pk_key = f'CONTRACTOR#{contractor_id}'
-                print(f"[VALIDATE_CONTRACTOR_NAME] Looking up PK={pk_key}, SK=PROFILE")
+                contractor_ids.append(contractor_id)
+                print(f"[VALIDATE_CONTRACTOR_NAME] Extracted ContractorID: {contractor_id}")
 
-                try:
-                    contractor_response = dynamodb_client.table.get_item(
-                        Key={'PK': pk_key, 'SK': 'PROFILE'}
-                    )
-                    print(f"[VALIDATE_CONTRACTOR_NAME] get_item response keys: {list(contractor_response.keys())}")
+        print(f"[VALIDATE_CONTRACTOR_NAME] Total ContractorIDs to fetch: {len(contractor_ids)}")
 
-                    if 'Item' in contractor_response:
-                        contractor = contractor_response['Item']
-                        # Build ContractorName from FirstName + LastName
-                        first_name = contractor.get('FirstName', '')
-                        last_name = contractor.get('LastName', '')
-                        contractor_name = f"{first_name} {last_name}".strip()
-                        contractor['ContractorName'] = contractor_name
-                        contractors.append(contractor)
-                        print(f"[VALIDATE_CONTRACTOR_NAME] ✅ Loaded contractor: {contractor_name}")
-                    else:
-                        print(f"[VALIDATE_CONTRACTOR_NAME] ⚠️  No Item in response for {pk_key}")
-                except Exception as e:
-                    print(f"[VALIDATE_CONTRACTOR_NAME] ❌ Error loading contractor {contractor_id}: {type(e).__name__}: {str(e)}")
-            else:
-                print(f"[VALIDATE_CONTRACTOR_NAME] ⚠️  Association has no ContractorID field")
+        # STEP 3: Fetch contractor profiles using batch_get_item
+        print(f"[VALIDATE_CONTRACTOR_NAME] === STEP 5: Fetch contractor profiles ===")
+        contractors = []
+
+        if not contractor_ids:
+            print(f"[VALIDATE_CONTRACTOR_NAME] No contractor IDs found in mappings")
+            response = {'Items': []}
+        else:
+            # Fetch each contractor profile
+            for contractor_id in contractor_ids:
+                print(f"[VALIDATE_CONTRACTOR_NAME] Fetching contractor: {contractor_id}")
+                contractor_response = dynamodb_client.table.get_item(
+                    Key={
+                        'PK': f'CONTRACTOR#{contractor_id}',
+                        'SK': 'PROFILE'
+                    }
+                )
+
+                if 'Item' in contractor_response:
+                    contractors.append(contractor_response['Item'])
+                    print(f"[VALIDATE_CONTRACTOR_NAME] ✅ Loaded contractor profile")
+                else:
+                    print(f"[VALIDATE_CONTRACTOR_NAME] ⚠️ Contractor profile not found")
+
+            response = {'Items': contractors}
+
+        print(f"[VALIDATE_CONTRACTOR_NAME] === STEP 6: Summary of loaded contractors ===")
+        contractors = response.get('Items', [])
+        print(f"[VALIDATE_CONTRACTOR_NAME] Total contractor profiles loaded: {len(contractors)}")
+
+        if contractors:
+            print(f"[VALIDATE_CONTRACTOR_NAME] === STEP 7: Build ContractorName for each record ===")
+            for idx, contractor in enumerate(contractors):
+                print(f"[VALIDATE_CONTRACTOR_NAME] Processing contractor {idx+1}/{len(contractors)}")
+                print(f"[VALIDATE_CONTRACTOR_NAME] Contractor PK: {contractor.get('PK')}")
+                print(f"[VALIDATE_CONTRACTOR_NAME] Contractor SK: {contractor.get('SK')}")
+                print(f"[VALIDATE_CONTRACTOR_NAME] Contractor ContractorID: {contractor.get('ContractorID')}")
+
+                # Build ContractorName from FirstName + LastName
+                first_name = contractor.get('FirstName', '')
+                last_name = contractor.get('LastName', '')
+                print(f"[VALIDATE_CONTRACTOR_NAME] FirstName: '{first_name}'")
+                print(f"[VALIDATE_CONTRACTOR_NAME] LastName: '{last_name}'")
+
+                contractor_name_built = f"{first_name} {last_name}".strip()
+                contractor['ContractorName'] = contractor_name_built
+                print(f"[VALIDATE_CONTRACTOR_NAME] ✅ Built ContractorName: '{contractor_name_built}'")
 
         print(f"[VALIDATE_CONTRACTOR_NAME] Loaded {len(contractors)} contractor profiles")
 
@@ -944,16 +985,25 @@ def validate_contractor_name(contractor_name: str, umbrella_id: str, dynamodb_cl
             }
 
         # TIER 1: Exact match (case-insensitive)
-        print(f"[VALIDATE_CONTRACTOR_NAME] TIER 1: Attempting exact match (case-insensitive)")
+        print(f"[VALIDATE_CONTRACTOR_NAME] === STEP 8: TIER 1 - Exact match (case-insensitive) ===")
         contractor_name_lower = contractor_name_clean.lower()
+        print(f"[VALIDATE_CONTRACTOR_NAME] Search term (lowercase): '{contractor_name_lower}'")
+        print(f"[VALIDATE_CONTRACTOR_NAME] Comparing against {len(contractors)} contractors")
 
-        for contractor in contractors:
+        for idx, contractor in enumerate(contractors):
             db_name = contractor.get('ContractorName', '')
-            print(f"[VALIDATE_CONTRACTOR_NAME] Comparing '{contractor_name_lower}' with '{db_name.lower()}'")
+            db_name_lower = db_name.lower()
 
-            if db_name.lower() == contractor_name_lower:
+            print(f"[VALIDATE_CONTRACTOR_NAME] Comparison {idx+1}/{len(contractors)}:")
+            print(f"[VALIDATE_CONTRACTOR_NAME]   Search term:  '{contractor_name_lower}'")
+            print(f"[VALIDATE_CONTRACTOR_NAME]   DB name:      '{db_name_lower}'")
+            print(f"[VALIDATE_CONTRACTOR_NAME]   Match result: {db_name_lower == contractor_name_lower}")
+
+            if db_name_lower == contractor_name_lower:
                 contractor_id = contractor.get('ContractorID')
-                print(f"[VALIDATE_CONTRACTOR_NAME] ✅ EXACT MATCH FOUND! ContractorID: {contractor_id}")
+                print(f"[VALIDATE_CONTRACTOR_NAME] === ✅ EXACT MATCH FOUND! ===")
+                print(f"[VALIDATE_CONTRACTOR_NAME] Matched DB Name: '{db_name}'")
+                print(f"[VALIDATE_CONTRACTOR_NAME] ContractorID: {contractor_id}")
                 print(f"[VALIDATE_CONTRACTOR_NAME] Confidence: 100%")
                 return {
                     'valid': True,
@@ -963,48 +1013,72 @@ def validate_contractor_name(contractor_name: str, umbrella_id: str, dynamodb_cl
                     'confidence': 100.0
                 }
 
-        print(f"[VALIDATE_CONTRACTOR_NAME] No exact match found, proceeding to TIER 2: Fuzzy matching")
+        print(f"[VALIDATE_CONTRACTOR_NAME] === No exact match found after checking {len(contractors)} contractors ===")
+        print(f"[VALIDATE_CONTRACTOR_NAME] === STEP 8: TIER 2 - Fuzzy matching ===")
+        print(f"[VALIDATE_CONTRACTOR_NAME] Proceeding to fuzzy matching with threshold-based scoring")
 
         # TIER 2: Fuzzy matching with threshold
         from common.fuzzy_matcher import FuzzyMatcher
 
-        print(f"[VALIDATE_CONTRACTOR_NAME] Initializing FuzzyMatcher")
+        print(f"[VALIDATE_CONTRACTOR_NAME] === STEP 9: Initialize FuzzyMatcher ===")
         fuzzy_matcher = FuzzyMatcher()
+        print(f"[VALIDATE_CONTRACTOR_NAME] FuzzyMatcher initialized successfully")
 
+        print(f"[VALIDATE_CONTRACTOR_NAME] === STEP 10: Build contractor names dictionary ===")
         contractor_names = {c.get('ContractorID'): c.get('ContractorName', '') for c in contractors}
-        print(f"[VALIDATE_CONTRACTOR_NAME] Running fuzzy match against {len(contractor_names)} contractors")
+        print(f"[VALIDATE_CONTRACTOR_NAME] Built dictionary with {len(contractor_names)} entries")
+
+        for idx, (cid, name) in enumerate(list(contractor_names.items())[:5]):  # Show first 5
+            print(f"[VALIDATE_CONTRACTOR_NAME]   Entry {idx+1}: ContractorID={cid}, Name='{name}'")
+        if len(contractor_names) > 5:
+            print(f"[VALIDATE_CONTRACTOR_NAME]   ... and {len(contractor_names) - 5} more entries")
+
+        print(f"[VALIDATE_CONTRACTOR_NAME] === STEP 11: Execute fuzzy matching ===")
+        print(f"[VALIDATE_CONTRACTOR_NAME] Search term: '{contractor_name_clean}'")
+        print(f"[VALIDATE_CONTRACTOR_NAME] Candidates: {list(contractor_names.values())}")
 
         best_match = fuzzy_matcher.find_best_match(
             contractor_name_clean,
             list(contractor_names.values())
         )
 
+        print(f"[VALIDATE_CONTRACTOR_NAME] === STEP 12: Process fuzzy match result ===")
+        print(f"[VALIDATE_CONTRACTOR_NAME] best_match result: {best_match}")
+
         if best_match:
             matched_name = best_match['matched_string']
             confidence = best_match['score']
 
+            print(f"[VALIDATE_CONTRACTOR_NAME] Matched name: '{matched_name}'")
+            print(f"[VALIDATE_CONTRACTOR_NAME] Confidence score: {confidence}%")
+
             # Find contractor ID for matched name
+            print(f"[VALIDATE_CONTRACTOR_NAME] === STEP 13: Find ContractorID for matched name ===")
             contractor_id = None
             for cid, name in contractor_names.items():
+                print(f"[VALIDATE_CONTRACTOR_NAME] Checking if '{name}' == '{matched_name}': {name == matched_name}")
                 if name == matched_name:
                     contractor_id = cid
+                    print(f"[VALIDATE_CONTRACTOR_NAME] ✅ Found ContractorID: {contractor_id}")
                     break
 
-            print(f"[VALIDATE_CONTRACTOR_NAME] Fuzzy match result:")
-            print(f"[VALIDATE_CONTRACTOR_NAME]   Matched name: '{matched_name}'")
-            print(f"[VALIDATE_CONTRACTOR_NAME]   Contractor ID: {contractor_id}")
-            print(f"[VALIDATE_CONTRACTOR_NAME]   Confidence: {confidence}%")
+            print(f"[VALIDATE_CONTRACTOR_NAME] === STEP 14: Evaluate confidence threshold ===")
+            print(f"[VALIDATE_CONTRACTOR_NAME] Confidence threshold: 80%")
+            print(f"[VALIDATE_CONTRACTOR_NAME] Actual confidence: {confidence}%")
+            print(f"[VALIDATE_CONTRACTOR_NAME] Passes threshold: {confidence >= 80.0}")
 
             # Use 80% as threshold (configurable via system params)
             if confidence >= 80.0:
-                print(f"[VALIDATE_CONTRACTOR_NAME] ✅ FUZZY MATCH ACCEPTED (confidence >= 80%)")
+                print(f"[VALIDATE_CONTRACTOR_NAME] === ✅ FUZZY MATCH ACCEPTED (confidence >= 80%) ===")
 
                 warning = None
                 if confidence < 95.0:
                     warning = f"Fuzzy match: '{contractor_name_clean}' matched to '{matched_name}' with {confidence:.1f}% confidence"
-                    print(f"[VALIDATE_CONTRACTOR_NAME] ⚠️  Adding warning: {warning}")
+                    print(f"[VALIDATE_CONTRACTOR_NAME] ⚠️  Adding warning (confidence < 95%): {warning}")
+                else:
+                    print(f"[VALIDATE_CONTRACTOR_NAME] No warning needed (confidence >= 95%)")
 
-                return {
+                result = {
                     'valid': True,
                     'contractor_id': contractor_id,
                     'matched_name': matched_name,
@@ -1012,17 +1086,22 @@ def validate_contractor_name(contractor_name: str, umbrella_id: str, dynamodb_cl
                     'confidence': confidence,
                     'warning': warning
                 }
+                print(f"[VALIDATE_CONTRACTOR_NAME] Returning: {result}")
+                return result
             else:
-                print(f"[VALIDATE_CONTRACTOR_NAME] ❌ FUZZY MATCH REJECTED (confidence {confidence}% < 80%)")
-                return {
+                print(f"[VALIDATE_CONTRACTOR_NAME] === ❌ FUZZY MATCH REJECTED (confidence {confidence}% < 80%) ===")
+                result = {
                     'valid': False,
                     'error': f"Contractor '{contractor_name_clean}' not found. Closest match: '{matched_name}' ({confidence:.1f}% confidence)",
                     'match_type': 'fuzzy_rejected',
                     'confidence': confidence,
                     'suggested_name': matched_name
                 }
+                print(f"[VALIDATE_CONTRACTOR_NAME] Returning: {result}")
+                return result
 
-        print(f"[VALIDATE_CONTRACTOR_NAME] ❌ No fuzzy match found")
+        print(f"[VALIDATE_CONTRACTOR_NAME] === ❌ No fuzzy match found ===")
+        print(f"[VALIDATE_CONTRACTOR_NAME] best_match was None or empty")
         return {
             'valid': False,
             'error': f"Contractor '{contractor_name_clean}' not found in database",
